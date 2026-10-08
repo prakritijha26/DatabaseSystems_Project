@@ -3,19 +3,7 @@
 **Course:** BACSE202 – Database Management Systems  
 **Institution:** Vellore Institute of Technology (VIT)  
 **Semester:** Fall Semester 2026  
-**Review:** First Review  
 
----
-
-## 👥 Team Members
-
-| Name | Registration Number | Primary Responsibility |
-| :--- | :--- | :--- |
-| **Prakriti Prakash Jha** | 25BDS0066 | Database Schema, Seed Data & System Catalog Tracing |
-| **Kahill Manuel Alvares** | 25BCE2873 | Simulation Engine, Transaction Sandbox & Parser |
-| **Himali Agarwal** | 25BAI0012 | CLI Interface, Demo Scenarios & Test Suite |
-
-*(Workload distribution is flexible across team members during active development).*
 
 ---
 
