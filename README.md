@@ -92,9 +92,6 @@ The execution follows a strict 6-step transactional pipeline:
 ```text
 DatabaseSystems_Project/
 ├── README.md                           # Project documentation and progress tracking
-├── WhatIf_Database_Review_1.pdf        # Review 1 presentation slides (PDF)
-├── WhatIf_Database_Review_1.pptx       # Review 1 presentation slides (Source PPTX)
-├── What-If_Database_Project_Plan.docx  # Original project plan & specifications
 ├── schema.sql                          # Database schema: tables, views, triggers, constraints
 ├── seed.sql                            # Seed data: ~30 students, 4-5 courses, attendance, marks
 ├── engine.py                           # Parser, transaction sandbox, baseline & diff runner
