@@ -1,0 +1,15 @@
+{
+  "name": "whatif-database-frontend",
+  "version": "1.0.0",
+  "description": "TypeScript client and retro disco console for What-If Database Impact Analyzer",
+  "type": "module",
+  "scripts": {
+    "build": "bun build src/app.ts --outfile web/app.js",
+    "dev": "bun build src/app.ts --outfile web/app.js --watch",
+    "cli": "bun run src/cli.ts",
+    "demo": "bun run src/demo.ts"
+  },
+  "keywords": ["postgresql", "what-if", "database", "typescript", "bacse202"],
+  "author": "Kahill Alvares (Part C: Interface & Demo)",
+  "license": "ISC"
+}

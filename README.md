@@ -92,11 +92,18 @@ The execution follows a strict 6-step transactional pipeline:
 ```text
 DatabaseSystems_Project/
 ├── README.md                           # Project documentation and progress tracking
+├── app.py                              # Web interface server (FastAPI/Bottle HTTP server)
+├── web/                                # Web UI frontend assets
+│   ├── index.html                      # Single-page UI with terminal & dashboard
+│   ├── style.css                       # Modern dark developer workbench stylesheet
+│   └── app.js                          # Client-side terminal & interactive logic
+├── cli.py                              # Interactive CLI for running WHAT_IF queries
+├── demo.py                             # Automated evaluation runner for 6 review scenarios
+├── mock_engine.py                      # Contract-compliant offline simulation mock
 ├── schema.sql                          # Database schema: tables, views, triggers, constraints
 ├── seed.sql                            # Seed data: ~30 students, 4-5 courses, attendance, marks
 ├── engine.py                           # Parser, transaction sandbox, baseline & diff runner
 ├── dependencies.py                     # PostgreSQL catalog dependency inspector (pg_depend, etc.)
-├── cli.py                              # Interactive CLI for running WHAT_IF queries
 ├── tests/                              # Automated test suite
 │   ├── test_parser.py                  # Parser and validation tests
 │   ├── test_rollback.py                # State immutability & rollback guarantee tests
@@ -163,15 +170,64 @@ The system is evaluated against 6 core scenarios:
 
 ---
 
+## 🚀 Running the System (Part C: Interface & Demo)
+
+### 1. Launch Interactive Web UI (With On-Screen Terminal & Live Impact Dashboard)
+```bash
+python3 app.py
+```
+Open [http://localhost:8000](http://localhost:8000) in your browser. Features:
+- Embedded interactive shell for typing `WHAT_IF` statements.
+- One-click preset buttons for all 6 review scenarios.
+- Side-by-side visual diff cards for attendance thresholds, exam eligibility badges, CGPA deltas, and broken schema dependencies.
+
+### 2. Launch Interactive Terminal CLI
+```bash
+# Start interactive shell:
+python3 cli.py
+
+# Or evaluate a one-shot query directly:
+python3 cli.py "WHAT_IF DELETE FROM attendance WHERE student_id = 1042;"
+```
+
+### 3. Run Automated Review Scenario Demo Suite
+```bash
+# Python runner:
+python3 demo.py
+# or with interactive pauses:
+python3 demo.py --interactive
+```
+Executes all 6 official review scenarios with commentary and formats the resulting impact reports.
+
+### 4. TypeScript & Bun Workflow
+```bash
+# Bundle frontend client:
+bun run build
+
+# Native TypeScript CLI:
+bun run cli "WHAT_IF DELETE FROM attendance WHERE student_id = 1042;"
+
+# Automated TypeScript Demo Suite:
+bun run demo
+# or interactive:
+bun run demo --interactive
+```
+
+---
+
 ## 📈 Progress Tracker
 
 - [x] Review 1 Slides & Project Plan finalized
 - [x] Initial repository setup & README documentation
+- [x] Contract-compliant mock engine (`mock_engine.py`) for offline testing & demo
+- [x] Interactive CLI with formatted tables (`cli.py`)
+- [x] Web Interface with on-screen terminal & visual impact dashboard (`app.py`, `web/`)
+- [x] Automated review demo script for all 6 scenarios (`demo.py`)
+- [x] TypeScript migration for frontend & CLI drivers (`src/app.ts`, `src/cli.ts`, `src/demo.ts`)
 - [ ] PostgreSQL environment setup & connectivity
 - [ ] Database Schema (`schema.sql` with tables, cascades, views, triggers)
 - [ ] Seed Data (`seed.sql` with ~30 students, courses, attendance, marks)
 - [ ] Core Engine (`engine.py` with SQL parser, whitelist validator & rollback sandbox)
 - [ ] Metric Computation & Diff Logic (Attendance %, CGPA, Eligibility)
 - [ ] DDL Dependency Tracing (`dependencies.py` via `pg_depend` catalogs)
-- [ ] Interactive CLI (`cli.py`)
-- [ ] Test Suite & Demo Scenarios execution
+- [ ] Unit Test Suite (`tests/`)
