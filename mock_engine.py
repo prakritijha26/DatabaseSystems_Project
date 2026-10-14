@@ -251,6 +251,7 @@ def run_whatif(sql: str) -> Dict[str, Any]:
                     "change": "NO_CHANGE"
                 }
             ],
+            "broken_dependencies": [],
             "logs": [
                 "[1/6] [PARSE] Stripped WHAT_IF prefix; AST validated as DML (UPDATE).",
                 "[2/6] [BASELINE] Baseline metrics captured: CGPA = 8.74.",

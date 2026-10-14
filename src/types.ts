@@ -57,6 +57,7 @@ export interface ImpactReport {
   broken_dependencies: BrokenDependency[];
   logs: string[];
   engine_backend?: string;
+  rolled_back?: boolean;
 }
 
 export interface ReviewTrackScenario {

@@ -2,302 +2,56 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>What-If Database // Studio-77 Transactional Console</title>
-  
-  <!-- Retro Disco Typography: Righteous (Retro 70s Disco Display) + Space Mono (Analog Technical Monospace) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>What-If Database // Impact Analyzer</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Righteous&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-  
+  <link href="https://fonts.googleapis.com/css2?family=Righteous&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body class="console-body">
-
-  <!-- Studio Deck Master Header -->
-  <header class="console-chassis-header">
-    <div class="chassis-rivet top-left">+</div>
-    <div class="chassis-rivet top-right">+</div>
-
-    <div class="header-left">
-      <div class="disco-badge-block">
-        <span class="disco-logo-text">WHAT-IF</span>
-        <span class="disco-sub-tag">DECK-77</span>
-      </div>
-      <div class="header-title-block">
-        <h1 class="console-brand-title">WHAT-IF DATABASE</h1>
-        <div class="console-system-subtitle">
-          <span>BACSE202 DBMS // POSTGRESQL TRANSACTIONAL SANDBOX</span>
-          <span class="sub-sep">|</span>
-          <span class="sub-tape-counter">TAPE POS: 01042</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Analog Status Tally Lamps -->
-    <div class="header-tally-rack">
-      <div class="tally-indicator tally-cyan">
-        <span class="tally-led led-cyan"></span>
-        <span class="tally-label">SNAPSHOT // REPEATABLE READ</span>
-      </div>
-      <div class="tally-indicator tally-mint">
-        <span class="tally-led led-mint"></span>
-        <span class="tally-label">INTERLOCK // ZERO DISK WRITES</span>
-      </div>
-    </div>
+<body>
+  <header class="topbar">
+    <a class="wordmark" href="/">what-if<span class="logo-dot">.</span></a>
+    <span class="system-title">WHAT-IF DATABASE // IMPACT ANALYZER</span>
+    <span class="isolation"><i class="led"></i> ISOLATION: REPEATABLE READ</span>
   </header>
-
-  <!-- Track Selector: Backlit Channel Push-Buttons (No generic rounded boxes) -->
-  <section class="console-channel-rack">
-    <div class="rack-strip-label">
-      <span class="label-groove">SCENARIO TRACKS</span>
-    </div>
-    <div class="rack-buttons-row">
-      <button class="channel-btn active" data-scenario="1">
-        <span class="ch-tag">TRK-01</span>
-        <span class="ch-name">Attendance Drop</span>
-      </button>
-      <button class="channel-btn" data-scenario="2">
-        <span class="ch-tag">TRK-02</span>
-        <span class="ch-name">Mark / CGPA Delta</span>
-      </button>
-      <button class="channel-btn" data-scenario="3">
-        <span class="ch-tag">TRK-03</span>
-        <span class="ch-name">Course Cascade</span>
-      </button>
-      <button class="channel-btn" data-scenario="4">
-        <span class="ch-tag">TRK-04</span>
-        <span class="ch-name">Drop Column DDL</span>
-      </button>
-      <button class="channel-btn" data-scenario="5">
-        <span class="ch-tag">TRK-05</span>
-        <span class="ch-name">Safety Rejection</span>
-      </button>
-      <button class="channel-btn" data-scenario="6">
-        <span class="ch-tag">TRK-06</span>
-        <span class="ch-name">Verify Pristine</span>
-      </button>
-    </div>
-  </section>
-
-  <!-- Scenario Tape Cue Info Strip -->
-  <div id="scenario-info-banner" class="console-cue-strip">
-    <div class="cue-led">REC</div>
-    <span id="scenario-info-text">Track 1: Deletes 14 attendance records for student 1042 -> Attendance falls below 75% -> Exam eligibility flips from ELIGIBLE to INELIGIBLE.</span>
-  </div>
-
-  <!-- Main Console Stage: Modular Synth / Terminal Split -->
-  <main class="console-stage-grid">
-
-    <!-- Left Stage: Video Display Terminal (CRT Bezel + Chamfered Plate) -->
-    <section class="crt-vdt-module">
-      <div class="vdt-bezel-top">
-        <div class="vdt-title-strip">
-          <span class="vdt-icon-groove">///</span>
-          <span class="vdt-title">CHANNEL A: INTERACTIVE SQL TERMINAL</span>
-        </div>
-        <div class="vdt-actions">
-          <button id="clear-term-btn" class="vdt-clear-switch">CLEAR BUFFER</button>
-        </div>
+  <main>
+    <div class="intro"><div><p class="eyebrow">BACSE202 / DATABASE SYSTEMS / VIT</p><h1>See the change.<br><span>Keep the original.</span></h1></div><p class="intro-note">A workspace for hypothetical SQL.<br>Inspect the impact before it becomes real.</p></div>
+    <section aria-label="Scenario tracks" class="tracks-section">
+      <div class="section-heading"><h2>01 / SELECT A SCENARIO</h2><label class="schema-choice">QUERY SET <select id="query-set"><option value="review">Review examples</option><option value="live">Delivered schema</option></select></label></div>
+      <div class="tracks">
+        <button class="track active" data-scenario="1" aria-pressed="true"><span>TRK-01</span>Attendance</button>
+        <button class="track" data-scenario="2" aria-pressed="false"><span>TRK-02</span>Mark adjustment</button>
+        <button class="track" data-scenario="3" aria-pressed="false"><span>TRK-03</span>Course cascade</button>
+        <button class="track" data-scenario="4" aria-pressed="false"><span>TRK-04</span>Dependencies</button>
+        <button class="track" data-scenario="5" aria-pressed="false"><span>TRK-05</span>Safety filter</button>
+        <button class="track" data-scenario="6" aria-pressed="false"><span>TRK-06</span>Verification</button>
       </div>
-
-      <!-- Inner CRT Glass Screen -->
-      <div id="terminal-screen" class="crt-screen-glass">
-        <div class="crt-scanline-overlay"></div>
-
-        <div class="crt-greeting-block">
-          <pre class="disco-ascii-banner">
- __          ___           _           _____ ______ 
- \ \        / / |         | |         |_   _|  ____|
-  \ \  /\  / /| |__   __ _| |_ _____    | | | |__   
-   \ \/  \/ / | '_ \ / _` | __|_____|   | | |  __|  
-    \  /\  /  | | | | (_| | |_         _| |_| |     
-     \/  \/   |_| |_|\__,_|\__|       |_____|_|     
-          </pre>
-          <div class="vdt-meta-row">
-            <span class="meta-tag">SYS: WHAT-IF ENGINE v1.0</span>
-            <span class="meta-tag">ISOLATION: REPEATABLE READ</span>
-            <span class="meta-tag">ROLLBACK: ENFORCED</span>
-          </div>
-          <div class="vdt-hint-row">
-            Type <span class="highlight-cmd">help</span> for commands, press <span class="highlight-cmd">1-6</span> for tracks, or input any <span class="highlight-cmd">WHAT_IF &lt;sql&gt;</span> query.
-          </div>
-          <div class="console-divider-line"></div>
-        </div>
-
-        <!-- Terminal Output History -->
-        <div id="terminal-output" class="crt-log-stream"></div>
-
-        <!-- Live Cursor Prompt -->
-        <div id="terminal-active-line" class="crt-prompt-line">
-          <span class="crt-prompt-sign">whatif&gt;</span>
-          <input 
-            type="text" 
-            id="query-input" 
-            class="crt-input-cell" 
-            autocomplete="off" 
-            autocorrect="off" 
-            autocapitalize="off" 
-            spellcheck="false" 
-            placeholder="Type WHAT_IF command, 'help', or '1'-'6'..."
-            autofocus
-          >
-          <span class="crt-blinking-block">_</span>
-        </div>
-      </div>
+      <p id="scenario-hint" class="hint"></p>
     </section>
-
-    <!-- Right Stage: Analog VU Meter & Impact Rack (Chamfered Modular Rack) -->
-    <section class="analog-rack-module">
-      
-      <!-- Module Header -->
-      <div class="rack-module-header">
-        <div class="rack-header-title">
-          <span class="groove-bracket">[</span>
-          <h2>IMPACT ANALYSIS RACK</h2>
-          <span class="groove-bracket">]</span>
-        </div>
-        <div id="report-status-badge" class="tally-pill pill-idle">
-          STANDBY
-        </div>
-      </div>
-
-      <!-- Execution Telemetry Strip -->
-      <div class="rack-strip-card">
-        <div class="telemetry-grid">
-          <div class="telemetry-cell">
-            <span class="cell-label">STATEMENT TYPE</span>
-            <span id="meta-type" class="cell-value">—</span>
-          </div>
-          <div class="telemetry-cell">
-            <span class="cell-label">CYCLE TIME</span>
-            <span id="meta-time" class="cell-value cell-cyan">—</span>
-          </div>
-          <div class="telemetry-cell">
-            <span class="cell-label">ISOLATION SNAPSHOT</span>
-            <span id="meta-mode" class="cell-value cell-mint">REPEATABLE READ</span>
-          </div>
-        </div>
-        <div class="sql-readout-box">
-          <span class="readout-tag">EVALUATED SQL //</span>
-          <code id="meta-sql" class="readout-code">Awaiting execution...</code>
-        </div>
-      </div>
-
-      <!-- Physical Row Mutation Ledger -->
-      <div class="rack-strip-card">
-        <div class="strip-card-header">
-          <span class="strip-card-title">AFFECTED RELATIONS &amp; ROWS</span>
-          <span id="total-rows-badge" class="strip-counter">0 ROWS</span>
-        </div>
-        <div id="tables-affected-list" class="ledger-rows-list">
-          <div class="ledger-empty">Zero persistent rows modified in database storage.</div>
-        </div>
-      </div>
-
-      <!-- Analog VU Meters: Attendance, Eligibility & CGPA -->
-      <div id="metrics-section" class="vu-meters-rack">
-
-        <!-- Attendance Meter (Stereo LED VU Meter Bar) -->
-        <div class="rack-strip-card meter-card">
-          <div class="strip-card-header">
-            <span class="strip-card-title">ATTENDANCE LEVEL // VU METER</span>
-            <span id="attendance-delta-badge" class="delta-tag neutral">0.0%</span>
-          </div>
-
-          <div class="meter-readout-row">
-            <div class="readout-stat">
-              <span class="stat-caption">BASELINE</span>
-              <span id="att-before" class="stat-digits">—</span>
-            </div>
-            <div class="readout-arrow">➔</div>
-            <div class="readout-stat">
-              <span class="stat-caption">HYPOTHETICAL</span>
-              <span id="att-after" class="stat-digits">—</span>
-            </div>
-          </div>
-
-          <!-- Segmented Analog VU Bar -->
-          <div class="vu-bar-assembly">
-            <div class="vu-scale-ticks">
-              <span>0%</span>
-              <span>25%</span>
-              <span>50%</span>
-              <span class="tick-warning">75% [MIN]</span>
-              <span>100%</span>
-            </div>
-            <div class="vu-track-groove">
-              <div class="vu-needle-threshold" title="75% Requirement"></div>
-              <div id="attendance-bar" class="vu-led-segments" style="width: 0%;"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Exam Eligibility Tally Gate -->
-        <div class="rack-strip-card meter-card">
-          <div class="strip-card-header">
-            <span class="strip-card-title">EXAM ELIGIBILITY GATE</span>
-            <span id="eligibility-status-badge" class="status-tally-pill neutral">—</span>
-          </div>
-
-          <div class="tally-gate-row">
-            <div class="gate-box">
-              <span class="gate-caption">BEFORE</span>
-              <span id="elig-before" class="gate-tally neutral">—</span>
-            </div>
-            <div class="gate-transfer-arrow">➔</div>
-            <div class="gate-box">
-              <span class="gate-caption">AFTER</span>
-              <span id="elig-after" class="gate-tally neutral">—</span>
-            </div>
-          </div>
-          <div id="elig-reason" class="gate-reason-note">Evaluated against VIT 75% attendance rule.</div>
-        </div>
-
-        <!-- Academic CGPA Stepper Counter -->
-        <div class="rack-strip-card meter-card">
-          <div class="strip-card-header">
-            <span class="strip-card-title">CREDIT-WEIGHTED CGPA</span>
-            <span id="cgpa-delta-badge" class="delta-tag neutral">0.00</span>
-          </div>
-
-          <div class="meter-readout-row">
-            <div class="readout-stat">
-              <span class="stat-caption">BASELINE CGPA</span>
-              <span id="cgpa-before" class="stat-digits">—</span>
-            </div>
-            <div class="readout-arrow">➔</div>
-            <div class="readout-stat">
-              <span class="stat-caption">SIMULATED CGPA</span>
-              <span id="cgpa-after" class="stat-digits">—</span>
-            </div>
-          </div>
-          <div id="cgpa-note" class="gate-reason-note">Calculated across active course credit weights in marks table.</div>
-        </div>
-      </div>
-
-      <!-- Catalog Reverse Dependencies (Tripped Circuits for DDL) -->
-      <div id="schema-section" class="rack-strip-card fault-strip-card" style="display: none;">
-        <div class="strip-card-header">
-          <span class="strip-card-title fault-title">TRIPPED CATALOG DEPENDENCIES</span>
-          <span id="broken-count-badge" class="fault-badge">0 FAULTS</span>
-        </div>
-        <div class="fault-desc">PostgreSQL catalogs (<code>pg_depend</code>, <code>pg_rewrite</code>, <code>pg_constraint</code>):</div>
-        <div id="broken-dependencies-list" class="fault-items-list"></div>
-      </div>
-
-      <!-- Master Interlock Seal -->
-      <div class="interlock-seal-box">
-        <div class="seal-icon">RECORD INTERLOCK</div>
-        <div class="seal-text">
-          <div class="seal-headline">TRANSACTION SANDBOX SECURED</div>
-          <div class="seal-body">PostgreSQL ROLLBACK executed in finally block. Real database remains 100% pristine.</div>
-        </div>
-      </div>
-
+    <section class="command" aria-labelledby="command-heading">
+      <div class="section-heading"><h2 id="command-heading">02 / WRITE THE HYPOTHESIS</h2><span>CTRL / CMD + ENTER TO RUN</span></div>
+      <form id="query-form">
+        <div class="editor"><pre id="line-numbers" aria-hidden="true">01</pre><label class="sr-only" for="query-input">SQL statement</label><textarea id="query-input" rows="4" spellcheck="false" placeholder="WHAT_IF UPDATE marks SET score = 45 WHERE enrollment_id = 1;"></textarea></div>
+        <div class="command-footer"><span>SQL / POSTGRESQL</span><button id="execute-btn" type="submit">[ EXECUTE SIMULATION ] <span aria-hidden="true">↗</span></button></div>
+      </form>
     </section>
+    <section class="results" aria-labelledby="impact-heading" aria-busy="false">
+      <div class="section-heading"><h2 id="impact-heading">03 / IMPACT REPORT</h2><span id="report-status" role="status">AWAITING EXECUTION</span></div>
+      <div class="result-meta"><span id="backend">BACKEND / NOT YET CONNECTED</span><span id="execution-time">— ms</span></div>
+      <p id="report-message" role="status" class="hint">Choose a track or write a statement to begin.</p>
+      <div class="metrics">
+        <article><h3>ATTENDANCE <span id="attendance-delta">—</span></h3><div class="reading"><span id="att-before">—</span><span class="arrow">→</span><strong id="att-after">—</strong></div><div class="meter" id="attendance-meter" role="meter" aria-label="Hypothetical attendance" aria-valuemin="0" aria-valuemax="100"><div id="attendance-bar"></div><i class="threshold"></i></div><div class="meter-scale"><span>0</span><span>75% MINIMUM</span><span>100</span></div><p id="attendance-context" class="metric-note">No attendance result yet.</p></article>
+        <article><h3>EXAM ELIGIBILITY</h3><div class="reading"><span id="elig-before">—</span><span class="arrow">→</span></div><span class="pill" id="elig-after">NOT EVALUATED</span><p class="metric-note">Eligibility threshold: attendance ≥ 75%.</p></article>
+        <article><h3 id="score-title">CGPA DELTA</h3><div class="reading"><span id="score-before">—</span><span class="arrow">→</span><strong id="score-after">—</strong></div><span class="score-delta" id="score-delta">—</span><p id="score-note" class="metric-note">No academic result yet.</p></article>
+      </div>
+      <div class="detail-grid"><section><div class="section-heading"><h3>AFFECTED RELATIONS</h3><span id="row-count">— ROWS</span></div><table><thead><tr><th>Relation</th><th>Operation</th><th class="numeric">Rows</th></tr></thead><tbody id="table-rows"><tr><td colspan="3" class="empty">No simulation executed.</td></tr></tbody></table></section><section><div class="section-heading"><h3>REVERSE DEPENDENCIES</h3><span id="dependency-count">—</span></div><div id="dependencies" class="dependency-list"><p class="empty">Awaiting analysis.</p></div></section></div>
+      <details id="metric-details"><summary>All academic metric changes</summary><div class="table-scroll"><table><thead><tr><th>Student / course</th><th>Metric</th><th>Before</th><th>After</th><th>Delta</th></tr></thead><tbody id="metric-rows"></tbody></table></div></details>
+      <details><summary>Execution log</summary><pre id="execution-log">No activity.</pre></details>
+      <div class="interlock"><span id="interlock-label">INTERLOCK / STANDBY</span><span id="interlock-message">Rollback confirmation appears after execution.</span></div>
+    </section>
+    <footer><span>WHAT-IF / 2026</span><span>HYPOTHETICAL CHANGES. VISIBLE CONSEQUENCES.</span></footer>
   </main>
-
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js" defer></script>
 </body>
 </html>

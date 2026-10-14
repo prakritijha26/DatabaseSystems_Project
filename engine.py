@@ -1,3 +1,4 @@
+import os
 import re
 import psycopg
 import sqlglot
@@ -11,27 +12,29 @@ DB_CONFIG = {
 }
 
 def get_metrics(conn):
-    """Safely fetch basic counts from core tables with a local statement timeout."""
+    """Fetch core table counts inside the caller’s snapshot and timeout."""
     tables = ["students", "courses", "enrollments", "attendance", "marks"]
     metrics = {}
     with conn.cursor() as cur:
-        try:
-            cur.execute("SET LOCAL statement_timeout = 2000;")
-        except Exception:
-            pass
-            
         for table in tables:
-            try:
-                cur.execute(f"SELECT count(*) FROM {table}")
-                row = cur.fetchone()
-                metrics[table] = row[0] if row else 0
-            except Exception:
-                metrics[table] = 0
+            cur.execute(f"SELECT count(*) FROM {table}")
+            metrics[table] = cur.fetchone()[0]
     return metrics
 
-def run_whatif(sql: str, password: str):
+
+def get_academic_metrics(conn):
+    """Read metrics exposed by the delivered schema without inventing CGPA."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT student_id, course_code, attendance_percentage, exam_eligible FROM attendance_eligibility")
+        attendance = [dict(zip(("student_id", "course_code", "attendance_percentage", "exam_eligible"), row)) for row in cur.fetchall()]
+        cur.execute("SELECT student_id, weighted_average_score FROM student_performance")
+        performance = [dict(zip(("student_id", "weighted_average_score"), row)) for row in cur.fetchall()]
+    return {"attendance": attendance, "performance": performance}
+
+
+def run_whatif(sql: str, password: str | None = None):
     """Simulate a supported SQL change and roll it back."""
-    print("-> INSIDE run_whatif: Parsing statement...")
+    password = os.getenv("PGPASSWORD", "25BDS0066") if password is None else password
     statement = sql.strip().rstrip(";")
 
     if not statement.upper().startswith("WHAT_IF "):
@@ -73,30 +76,30 @@ def run_whatif(sql: str, password: str):
         "rolled_back": False,
     }
 
-    print("-> INSIDE run_whatif: Connecting to database...")
+    # Connect outside the execution block so callers can distinguish availability
+    # failures from failures after a transaction has started.
     try:
-        with psycopg.connect(
-            **DB_CONFIG,
-            password=password,
-            connect_timeout=10,
-        ) as conn:
-            print("-> INSIDE run_whatif: Connected! Getting 'before' metrics...")
-            report["before"] = get_metrics(conn)
-            
-            print("-> INSIDE run_whatif: Executing statement...")
-            result = conn.execute(statement)
-            report["rows_affected"] = result.rowcount
-            
-            print("-> INSIDE run_whatif: Getting 'after' metrics...")
-            report["after"] = get_metrics(conn)
-            
-            print("-> INSIDE run_whatif: Rolling back...")
+        conn = psycopg.connect(**DB_CONFIG, password=password, connect_timeout=3)
+    except psycopg.OperationalError as exc:
+        raise ConnectionError("PostgreSQL connection unavailable") from exc
+    try:
+        conn.execute("BEGIN ISOLATION LEVEL REPEATABLE READ")
+        conn.execute("SET LOCAL statement_timeout = 2000")
+        report["before"] = get_metrics(conn)
+        report["academic_before"] = get_academic_metrics(conn)
+        result = conn.execute(statement)
+        report["rows_affected"] = max(result.rowcount, 0)
+        report["after"] = get_metrics(conn)
+        report["academic_after"] = get_academic_metrics(conn)
+        report["operation"] = node.key.upper()
+        target = node.this
+        if isinstance(target, exp.Schema):
+            target = target.this
+        report["target_table"] = target.name
+    finally:
+        try:
             conn.rollback()
             report["rolled_back"] = True
-            print("-> INSIDE run_whatif: Rollback complete.")
-
-    except Exception as e:
-        print(f"-> DATABASE ERROR EXCEPTION: {e}")
-        raise e
-
+        finally:
+            conn.close()
     return report

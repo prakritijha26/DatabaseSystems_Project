@@ -14,10 +14,8 @@ import time
 import argparse
 from cli import format_impact_report, Colors, BACKEND_NAME
 
-try:
-    from engine import run_whatif
-except ImportError:
-    from mock_engine import run_whatif
+from app import run_whatif
+BACKEND_NAME = "Automatic live / labeled offline fallback"
 
 DEMO_SCENARIOS = [
     {
@@ -53,7 +51,7 @@ DEMO_SCENARIOS = [
     {
         "number": 6,
         "title": "Post-Simulation Immutability Verification (Plain SELECT)",
-        "description": "Executes a direct SELECT against PostgreSQL to prove that all previous hypothetical simulations were cleanly rolled back and persistent storage remains 100% pristine.",
+        "description": "Shows the verification fixture offline; the current live DML engine rejects SELECT.",
         "sql": "SELECT student_id, name, attendance_pct, cgpa, exam_eligible FROM student_summary_view WHERE student_id = 1042;"
     }
 ]
@@ -81,8 +79,8 @@ def run_demo(interactive: bool = False):
         format_impact_report(report)
 
     print(f"\n{Colors.BOLD}{Colors.GREEN}{'=' * 76}{Colors.ENDC}")
-    print(f"{Colors.BOLD}{Colors.GREEN}   ✅ ALL 6 DEMO SCENARIOS COMPLETED SUCCESSFULLY!{Colors.ENDC}")
-    print(f"{Colors.GREEN}   All snapshot transactions rolled back. Live database remains 100% pristine.{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.GREEN}   ✅ DEMO RUN COMPLETE — REVIEW THE SIX REPORTS.{Colors.ENDC}")
+    print(f"{Colors.GREEN}   Review each report for backend mode, errors, and rollback confirmation.{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.GREEN}{'=' * 76}{Colors.ENDC}\n")
 
 def main():

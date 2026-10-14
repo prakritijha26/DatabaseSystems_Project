@@ -231,3 +231,25 @@ bun run demo --interactive
 - [ ] Metric Computation & Diff Logic (Attendance %, CGPA, Eligibility)
 - [ ] DDL Dependency Tracing (`dependencies.py` via `pg_depend` catalogs)
 - [ ] Unit Test Suite (`tests/`)
+
+### Integrated web interface
+
+Start `python3 app.py` and open `http://127.0.0.1:8000`. Rebuild the browser client with `bun run build` after changing `src/app.ts`.
+
+HTTP and both CLIs use the `app.run_whatif` adapter. If `psycopg`/`sqlglot` are missing or the database connection cannot be opened, reports explicitly identify **offline fixture data**. SQL validation and execution failures do not trigger mock fallback.
+
+For the live engine, install `psycopg[binary]` and `sqlglot` in your Python environment and set `PGPASSWORD`. An explicit `engine.run_whatif(sql, password=...)` argument overrides the environment; the course demo password is the final local fallback. The database connection settings remain in `engine.DB_CONFIG`.
+
+Select **Delivered schema** in the interface for enrollment-based DML examples compatible with `schema.sql` and `seed.sql`. The original review examples target a different schema. The delivered engine supports UPDATE, INSERT, and DELETE only: DDL dependency tracing and verification SELECT return rejection reports in live mode. Its academic view exposes weighted score, not institutional CGPA; the UI preserves that distinction. Rollback confirmation means transaction changes were discarded, not that PostgreSQL performed zero physical writes or reversed sequence advances.
+
+Verification:
+
+```sh
+python3 -m unittest discover -s tests -v
+python3 handoff/tests/verify_contract.py
+bun run demo
+python3 demo.py
+bun run build
+```
+
+Engine lifecycle tests require the live Python dependencies; otherwise those tests are reported as skipped. They exercise connection doubles and do not replace an integration test against an initialized PostgreSQL database.

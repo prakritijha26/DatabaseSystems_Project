@@ -18,12 +18,8 @@ import argparse
 from typing import Dict, Any
 
 # Import simulation engine
-try:
-    from engine import run_whatif
-    BACKEND_NAME = "engine.py (Live PostgreSQL Engine)"
-except ImportError:
-    from mock_engine import run_whatif
-    BACKEND_NAME = "mock_engine.py (Contract Mock Engine)"
+from app import run_whatif
+BACKEND_NAME = "Automatic live / labeled offline fallback"
 
 # Lospec Revival Palette (24-bit Truecolor ANSI)
 class Colors:
@@ -161,7 +157,9 @@ def format_impact_report(report: Dict[str, Any], show_json: bool = False):
             print(f"  {Colors.FAIL}{name:<28}{Colors.ENDC} {b_type:<16} {Colors.DIM}{reason:<35}{Colors.ENDC}")
 
     # 6. Integrity Note
-    print(f"\n{Colors.GREEN}🔒 Integrity Check:{Colors.ENDC} PostgreSQL ROLLBACK guaranteed. Zero persistent writes.")
+    message = ("Offline fixture: no SQL executed." if report.get("engine_backend") == "mock" else
+               "Transaction rollback confirmed." if report.get("rolled_back") else "Rollback not confirmed.")
+    print(f"\n{Colors.GREEN}Interlock:{Colors.ENDC} {message}")
 
 def repl():
     """Interactive command-line loop."""

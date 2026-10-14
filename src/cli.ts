@@ -40,10 +40,7 @@ export async function executeQuery(sql: string): Promise<ImpactReport> {
     "-c",
     `
 import json, sys
-try:
-    from engine import run_whatif
-except ImportError:
-    from mock_engine import run_whatif
+from app import run_whatif
 report = run_whatif(sys.argv[1])
 print(json.dumps(report))
 `,
@@ -94,7 +91,7 @@ export function formatReport(report: ImpactReport, showJson = false): void {
   const tables = report.tables_affected || [];
   console.log(`\n${C.GOLD}${C.BOLD}Relations Modified in Snapshot:${C.RESET}`);
   if (tables.length === 0) {
-    console.log(`  ${C.DIM}(Zero physical rows modified; live state pristine)${C.RESET}`);
+    console.log(`  ${C.DIM}(No changed relations reported)${C.RESET}`);
   } else {
     console.log(`  ${C.BOLD}${"Relation".padEnd(22)} ${"Action".padEnd(22)} ${"Delta".padEnd(12)}${C.RESET}`);
     console.log(`  ${"-".repeat(22)} ${"-".repeat(22)} ${"-".repeat(12)}`);
@@ -131,7 +128,8 @@ export function formatReport(report: ImpactReport, showJson = false): void {
     }
   }
 
-  console.log(`\n${C.MINT}INTERLOCK SECURED:${C.RESET} PostgreSQL ROLLBACK executed in finally block. Real database pristine.\n`);
+  const interlock = report.engine_backend === "mock" ? "Offline fixture: no SQL executed." : report.rolled_back ? "Transaction rollback confirmed." : "Rollback not confirmed.";
+  console.log(`\n${C.MINT}INTERLOCK:${C.RESET} ${interlock}\n`);
 }
 
 async function main() {

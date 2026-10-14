@@ -53,7 +53,7 @@ const DEMO_SCENARIOS: DemoScenario[] = [
   {
     number: 6,
     title: "Post-Simulation Immutability Verification (Plain SELECT)",
-    description: "Executes a direct SELECT against PostgreSQL to prove that all previous hypothetical simulations were cleanly rolled back and persistent storage remains 100% pristine.",
+    description: "Shows the verification fixture offline; the current live DML engine rejects SELECT.",
     sql: "SELECT student_id, name, attendance_pct, cgpa, exam_eligible FROM student_summary_view WHERE student_id = 1042;"
   }
 ];
@@ -105,8 +105,8 @@ export async function runDemo(interactive = false): Promise<void> {
   }
 
   console.log(`\n${C.BOLD}${C.MINT}${"=".repeat(76)}${C.RESET}`);
-  console.log(`${C.BOLD}${C.MINT}   ✅ ALL 6 DEMO SCENARIOS COMPLETED SUCCESSFULLY!${C.RESET}`);
-  console.log(`${C.MINT}   All snapshot transactions rolled back. Live database remains 100% pristine.${C.RESET}`);
+  console.log(`${C.BOLD}${C.MINT}   ✅ DEMO RUN COMPLETE — REVIEW THE SIX REPORTS.${C.RESET}`);
+  console.log(`${C.MINT}   Review each report for backend mode, errors, and rollback confirmation.${C.RESET}`);
   console.log(`${C.BOLD}${C.MINT}${"=".repeat(76)}${C.RESET}\n`);
 }
 

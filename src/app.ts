@@ -1,620 +1,180 @@
-/**
- * src/app.ts
- * Main TypeScript frontend client for What-If Database Studio Console.
- * Manages the interactive CRT terminal, physical channel buttons, and segmented VU meters.
- */
+import type { ImpactReport, MetricItem } from './types';
 
-import type { ImpactReport, TableAffected, MetricItem, BrokenDependency, ReviewTrackScenario } from "./types";
-
-const SCENARIOS: Record<string, ReviewTrackScenario> = {
-  "1": {
-    number: 1,
-    id: "1",
-    title: "Attendance Deletion (Eligibility Flip)",
-    sql: "WHAT_IF DELETE FROM attendance WHERE student_id = 1042;",
-    hint: "Track 1: Deletes 14 attendance records for student 1042 -> Attendance falls below 75% -> Exam eligibility flips from ELIGIBLE to INELIGIBLE."
-  },
-  "2": {
-    number: 2,
-    id: "2",
-    title: "Mark Update (CGPA Recalculation)",
-    sql: "WHAT_IF UPDATE marks SET score = 45 WHERE student_id = 1042 AND course_id = 'CSE202';",
-    hint: "Track 2: Modifies student 1042's CSE202 mark -> Credit-weighted CGPA recalculated in snapshot -> Numerical delta displayed."
-  },
-  "3": {
-    number: 3,
-    id: "3",
-    title: "Course Deregistration (Cascades)",
-    sql: "WHAT_IF DELETE FROM enrollments WHERE student_id = 1042 AND course_id = 'CSE202';",
-    hint: "Track 3: Course deregistration -> Foreign key constraints trigger ON DELETE CASCADE into attendance (26 rows) and marks (3 rows)."
-  },
-  "4": {
-    number: 4,
-    id: "4",
-    title: "Drop Column (Catalog Reverse Dependency)",
-    sql: "WHAT_IF ALTER TABLE marks DROP COLUMN score;",
-    hint: "Track 4: Hypothetical DDL -> Queries pg_depend and pg_rewrite catalogs -> Traces broken CGPA views and failing metric queries."
-  },
-  "5": {
-    number: 5,
-    id: "5",
-    title: "Sandbox Security Filter",
-    sql: "WHAT_IF COMMIT;",
-    hint: "Track 5: Sandbox security filter -> Rejects COMMIT to guarantee the transaction snapshot can never escape."
-  },
-  "6": {
-    number: 6,
-    id: "6",
-    title: "Post-Simulation Immutability Verification",
-    sql: "SELECT student_id, name, attendance_pct, cgpa, exam_eligible FROM student_summary_view WHERE student_id = 1042;",
-    hint: "Track 6: Post-simulation audit -> Runs direct SELECT against PostgreSQL proving live tables remain 100% pristine."
-  }
+const reviewQueries = [
+  'WHAT_IF DELETE FROM attendance WHERE student_id = 1042;',
+  "WHAT_IF UPDATE marks SET score = 45 WHERE student_id = 1042 AND course_id = 'CSE202';",
+  "WHAT_IF DELETE FROM enrollments WHERE student_id = 1042 AND course_id = 'CSE202';",
+  'WHAT_IF ALTER TABLE marks DROP COLUMN score;',
+  'WHAT_IF COMMIT;',
+  'SELECT student_id, name, attendance_pct, cgpa, exam_eligible FROM student_summary_view WHERE student_id = 1042;'
+];
+const liveQueries = [
+  'WHAT_IF UPDATE attendance SET classes_attended = 20 WHERE enrollment_id = 1;',
+  'WHAT_IF UPDATE marks SET score = 45 WHERE enrollment_id = 1;',
+  'WHAT_IF DELETE FROM enrollments WHERE enrollment_id = 1;',
+  reviewQueries[3], reviewQueries[4],
+  'SELECT student_id, student_name, course_code, attendance_percentage, exam_eligible FROM attendance_eligibility WHERE student_id = 1001;'
+];
+const hints = [
+  'Compare attendance and exam eligibility against the 75% threshold.',
+  'Inspect the academic metric change after a mark adjustment.',
+  'Inspect deleted enrollment rows and dependent attendance / marks.',
+  'Inspect reverse dependencies. Live DDL is not yet supported; offline results are fixtures.',
+  'Test rejection of explicit transaction control.',
+  'Inspect baseline data. Live SELECT is not yet supported; offline results are fixtures.'
+];
+const el = (id: string): HTMLElement => {
+  const element = document.getElementById(id);
+  if (!element) throw new Error(`Missing interface element: ${id}`);
+  return element;
 };
+const text = (id: string, value: string) => { el(id).textContent = value; };
+const input = el('query-input') as HTMLTextAreaElement;
+const execute = el('execute-btn') as HTMLButtonElement;
+const querySet = el('query-set') as HTMLSelectElement;
+const tracks = document.querySelectorAll<HTMLButtonElement>('.track');
+let selected = 0;
+let busy = false;
 
-document.addEventListener("DOMContentLoaded", () => {
-  // DOM Elements with strict HTML element types
-  const terminalScreen = document.getElementById("terminal-screen") as HTMLElement;
-  const terminalOutput = document.getElementById("terminal-output") as HTMLElement;
-  const queryInput = document.getElementById("query-input") as HTMLInputElement;
-  const clearTermBtn = document.getElementById("clear-term-btn") as HTMLButtonElement | null;
-  const scenarioInfoText = document.getElementById("scenario-info-text") as HTMLElement;
-  const channelButtons = document.querySelectorAll<HTMLButtonElement>(".channel-btn");
-
-  // Telemetry & Status Elements
-  const reportStatusBadge = document.getElementById("report-status-badge") as HTMLElement;
-  const metaType = document.getElementById("meta-type") as HTMLElement;
-  const metaMode = document.getElementById("meta-mode") as HTMLElement;
-  const metaTime = document.getElementById("meta-time") as HTMLElement;
-  const metaSql = document.getElementById("meta-sql") as HTMLElement;
-  const totalRowsBadge = document.getElementById("total-rows-badge") as HTMLElement;
-  const tablesAffectedList = document.getElementById("tables-affected-list") as HTMLElement;
-
-  // VU Meter Elements
-  const metricsSection = document.getElementById("metrics-section") as HTMLElement;
-  const attBefore = document.getElementById("att-before") as HTMLElement;
-  const attAfter = document.getElementById("att-after") as HTMLElement;
-  const attendanceDeltaBadge = document.getElementById("attendance-delta-badge") as HTMLElement;
-  const attendanceBar = document.getElementById("attendance-bar") as HTMLElement;
-
-  const eligBefore = document.getElementById("elig-before") as HTMLElement;
-  const eligAfter = document.getElementById("elig-after") as HTMLElement;
-  const eligReason = document.getElementById("elig-reason") as HTMLElement;
-  const eligibilityStatusBadge = document.getElementById("eligibility-status-badge") as HTMLElement;
-
-  const cgpaBefore = document.getElementById("cgpa-before") as HTMLElement;
-  const cgpaAfter = document.getElementById("cgpa-after") as HTMLElement;
-  const cgpaDeltaBadge = document.getElementById("cgpa-delta-badge") as HTMLElement;
-  const cgpaNote = document.getElementById("cgpa-note") as HTMLElement;
-
-  // Catalog Fault Rack Elements
-  const schemaSection = document.getElementById("schema-section") as HTMLElement;
-  const brokenCountBadge = document.getElementById("broken-count-badge") as HTMLElement;
-  const brokenDependenciesList = document.getElementById("broken-dependencies-list") as HTMLElement;
-
-  // Command History State
-  const commandHistory: string[] = [];
-  let historyIndex = -1;
-
-  // Click on CRT screen focuses command prompt
-  terminalScreen.addEventListener("click", () => {
-    queryInput.focus();
+function lineNumbers(): void {
+  text('line-numbers', input.value.split('\n').map((_, i) => String(i + 1).padStart(2, '0')).join('\n'));
+}
+function cue(index: number): void {
+  selected = index;
+  input.value = (querySet.value === 'live' ? liveQueries : reviewQueries)[index];
+  tracks.forEach((button, i) => {
+    button.classList.toggle('active', index === i);
+    button.setAttribute('aria-pressed', String(index === i));
   });
-  queryInput.focus();
-
-  if (clearTermBtn) {
-    clearTermBtn.addEventListener("click", (e: MouseEvent) => {
-      e.stopPropagation();
-      clearTerminal();
-    });
-  }
-
-  function clearTerminal(): void {
-    terminalOutput.innerHTML = "";
-    queryInput.value = "";
-    queryInput.focus();
-  }
-
-  // Handle Channel Button Clicks
-  channelButtons.forEach((btn: HTMLButtonElement) => {
-    btn.addEventListener("click", (e: MouseEvent) => {
-      e.stopPropagation();
-      channelButtons.forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-
-      const scId = btn.dataset.scenario;
-      if (scId && SCENARIOS[scId]) {
-        const sc = SCENARIOS[scId];
-        scenarioInfoText.textContent = sc.hint;
-        executeCommand(sc.sql);
-      }
-    });
-  });
-
-  // Terminal Keyboard Interaction
-  queryInput.addEventListener("keydown", (e: KeyboardEvent) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      const rawCmd = queryInput.value.trim();
-      if (!rawCmd) return;
-
-      commandHistory.push(rawCmd);
-      historyIndex = commandHistory.length;
-      queryInput.value = "";
-      executeCommand(rawCmd);
-    } else if (e.key === "ArrowUp") {
-      if (historyIndex > 0) {
-        historyIndex--;
-        queryInput.value = commandHistory[historyIndex];
-      }
-      e.preventDefault();
-    } else if (e.key === "ArrowDown") {
-      if (historyIndex < commandHistory.length - 1) {
-        historyIndex++;
-        queryInput.value = commandHistory[historyIndex];
-      } else {
-        historyIndex = commandHistory.length;
-        queryInput.value = "";
-      }
-      e.preventDefault();
-    }
-  });
-
-  /**
-   * Main Command Dispatcher
-   */
-  async function executeCommand(cmd: string): Promise<void> {
-    appendTerminalLine(cmd);
-    const lower = cmd.toLowerCase().trim();
-
-    if (lower === "clear" || lower === "cls") {
-      clearTerminal();
-      return;
-    }
-
-    if (lower === "help") {
-      printHelp();
-      scrollTerminalToBottom();
-      return;
-    }
-
-    if (lower === "scenarios" || lower === "tracks" || lower === "list") {
-      printScenariosList();
-      scrollTerminalToBottom();
-      return;
-    }
-
-    if (/^[1-6]$/.test(lower)) {
-      const sc = SCENARIOS[lower];
-      scenarioInfoText.textContent = sc.hint;
-      channelButtons.forEach(b => {
-        b.classList.toggle("active", b.dataset.scenario === lower);
-      });
-      printSystemNotice(`Cued Track #${lower}: ${sc.sql}`);
-      await runSimulationRequest(sc.sql);
-      return;
-    }
-
-    if (lower === "status") {
-      printStatus();
-      scrollTerminalToBottom();
-      return;
-    }
-
-    await runSimulationRequest(cmd);
-  }
-
-  function appendTerminalLine(cmd: string): void {
-    const entry = document.createElement("div");
-    entry.className = "term-entry";
-    entry.innerHTML = `
-      <div class="term-cmd-line">
-        <span class="crt-prompt-sign">whatif&gt;</span>
-        <span class="term-cmd-text">${escapeHtml(cmd)}</span>
-      </div>
-    `;
-    terminalOutput.appendChild(entry);
-    scrollTerminalToBottom();
-  }
-
-  function printSystemNotice(text: string): void {
-    const div = document.createElement("div");
-    div.style.color = "var(--c-cyan)";
-    div.style.fontSize = "0.74rem";
-    div.style.margin = "3px 0 3px 12px";
-    div.textContent = `[TRACK CUE] ${text}`;
-    terminalOutput.appendChild(div);
-  }
-
-  function printHelp(): void {
-    const box = document.createElement("div");
-    box.className = "term-report-box";
-    box.innerHTML = `
-      <div class="term-report-title"><span>WHAT-IF DATABASE CONSOLE COMMANDS</span></div>
-      <table class="term-ascii-table">
-        <tr><th>Command</th><th>Operation</th></tr>
-        <tr><td><code>WHAT_IF &lt;sql&gt;</code></td><td>Execute snapshot simulation (REPEATABLE READ; always rolled back)</td></tr>
-        <tr><td><code>SELECT &lt;sql&gt;</code></td><td>Query live PostgreSQL tables to verify zero persistent writes</td></tr>
-        <tr><td><code>1</code> ... <code>6</code></td><td>Quick-run review tracks 1 through 6</td></tr>
-        <tr><td><code>tracks</code> / <code>scenarios</code></td><td>Display all 6 evaluation scenarios</td></tr>
-        <tr><td><code>status</code></td><td>Inspect transaction sandbox and storage interlock</td></tr>
-        <tr><td><code>clear</code></td><td>Clear terminal screen</td></tr>
-      </table>
-    `;
-    terminalOutput.appendChild(box);
-  }
-
-  function printScenariosList(): void {
-    const box = document.createElement("div");
-    box.className = "term-report-box";
-    let rowsHtml = "";
-    Object.keys(SCENARIOS).forEach(num => {
-      rowsHtml += `
-        <tr>
-          <td><strong style="color:var(--c-gold)">TRK-${num}</strong></td>
-          <td><code>${escapeHtml(SCENARIOS[num].sql)}</code></td>
-        </tr>
-      `;
-    });
-    box.innerHTML = `
-      <div class="term-report-title"><span>OFFICIAL REVIEW TRACKS (Type 1-6 to execute)</span></div>
-      <table class="term-ascii-table">
-        <tr><th>Track</th><th>SQL Statement</th></tr>
-        ${rowsHtml}
-      </table>
-    `;
-    terminalOutput.appendChild(box);
-  }
-
-  function printStatus(): void {
-    const box = document.createElement("div");
-    box.className = "term-report-box";
-    box.innerHTML = `
-      <div class="term-report-title"><span>SYSTEM CONSOLE TELEMETRY</span></div>
-      <table class="term-ascii-table">
-        <tr><td>Isolation Level:</td><td><code>REPEATABLE READ (Snapshot Isolation)</code></td></tr>
-        <tr><td>Rollback Interlock:</td><td><code>ENFORCED (finally block guarantee)</code></td></tr>
-        <tr><td>Real Database State:</td><td><code>PRISTINE (0 bytes committed to storage)</code></td></tr>
-        <tr><td>Catalog Tracing:</td><td><code>pg_depend, pg_rewrite, pg_constraint</code></td></tr>
-      </table>
-    `;
-    terminalOutput.appendChild(box);
-  }
-
-  /**
-   * Run simulation against backend
-   */
-  async function runSimulationRequest(sql: string): Promise<void> {
-    try {
-      const response = await fetch("/api/whatif", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const report: ImpactReport = await response.json();
-      appendTerminalLogs(report.logs || []);
-      appendTerminalReportBox(report);
-      renderDashboard(report);
-
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      const errDiv = document.createElement("div");
-      errDiv.style.color = "var(--c-crimson)";
-      errDiv.style.fontSize = "0.75rem";
-      errDiv.style.margin = "4px 0 4px 12px";
-      errDiv.textContent = `[ERROR] Console communication failure: ${errMsg}`;
-      terminalOutput.appendChild(errDiv);
-    }
-
-    scrollTerminalToBottom();
-    queryInput.focus();
-  }
-
-  function appendTerminalLogs(logs: string[]): void {
-    const logBox = document.createElement("div");
-    logBox.style.margin = "4px 0";
-
-    logs.forEach(log => {
-      const p = document.createElement("div");
-      p.style.fontSize = "0.74rem";
-      p.style.marginLeft = "12px";
-      p.style.lineHeight = "1.5";
-
-      if (log.includes("[ERROR]") || log.includes("[REJECT]")) p.style.color = "var(--c-crimson)";
-      else if (log.includes("[CONFIRM]") || log.includes("[STATUS]")) p.style.color = "var(--c-mint)";
-      else if (log.includes("[CATALOG]")) p.style.color = "var(--c-gold)";
-      else if (log.includes("[ROLLBACK]")) p.style.color = "var(--c-rose)";
-      else if (log.includes("[SNAPSHOT]") || log.includes("[EXECUTE]")) p.style.color = "var(--c-cyan)";
-      else p.style.color = "rgba(247, 247, 234, 0.7)";
-
-      p.textContent = log;
-      logBox.appendChild(p);
-    });
-
-    terminalOutput.appendChild(logBox);
-  }
-
-  function appendTerminalReportBox(report: ImpactReport): void {
-    const box = document.createElement("div");
-    box.className = `term-report-box ${report.status === "ERROR" ? "error" : ""}`;
-
-    if (report.status === "ERROR") {
-      box.innerHTML = `
-        <div class="term-report-title"><span style="color:var(--c-crimson)">[REJECTED] SAFETY VIOLATION</span> <span>${report.execution_time_ms} ms</span></div>
-        <p style="color:var(--c-crimson); margin-top:4px;">${escapeHtml(report.error_message || "Validation Error")}</p>
-      `;
-      terminalOutput.appendChild(box);
-      return;
-    }
-
-    let tablesHtml = "";
-    (report.tables_affected || []).forEach((t: TableAffected) => {
-      tablesHtml += `<tr><td>${escapeHtml(t.table)}</td><td>${escapeHtml(t.action || 'MODIFIED')}</td><td>${t.rows_changed} rows</td></tr>`;
-    });
-
-    let metricsHtml = "";
-    (report.metrics || []).forEach((m: MetricItem) => {
-      const before = m.before !== undefined ? m.before + (m.unit || '') : '—';
-      const after = m.after !== undefined ? m.after + (m.unit || '') : '—';
-      const change = m.change !== undefined ? m.change : (m.status || '—');
-      metricsHtml += `<tr><td>${escapeHtml(m.metric)}</td><td>${escapeHtml(String(m.student_id || '—'))}</td><td>${before}</td><td>${after}</td><td><strong>${escapeHtml(String(change))}</strong></td></tr>`;
-    });
-
-    let brokenHtml = "";
-    (report.broken_dependencies || []).forEach((b: BrokenDependency) => {
-      brokenHtml += `<tr><td style="color:var(--c-crimson); font-weight:700">${escapeHtml(b.object_name)}</td><td>${escapeHtml(b.object_type)}</td><td>${escapeHtml(b.reason)}</td></tr>`;
-    });
-
-    let content = `
-      <div class="term-report-title">
-        <span>IMPACT TELEMETRY // [${escapeHtml(report.statement_type)}]</span>
-        <span>${report.execution_time_ms} ms</span>
-      </div>
-    `;
-
-    if (tablesHtml) {
-      content += `
-        <div style="color:var(--c-gold); font-size:0.7rem; font-weight:700; margin-top:6px;">RELATIONS MODIFIED IN SNAPSHOT:</div>
-        <table class="term-ascii-table">
-          <tr><th>Relation</th><th>Action</th><th>Delta</th></tr>
-          ${tablesHtml}
-        </table>
-      `;
-    }
-
-    if (metricsHtml) {
-      content += `
-        <div style="color:var(--c-gold); font-size:0.7rem; font-weight:700; margin-top:6px;">DERIVED ACADEMIC METRICS:</div>
-        <table class="term-ascii-table">
-          <tr><th>Metric</th><th>Student</th><th>Baseline</th><th>Hypothetical</th><th>Delta</th></tr>
-          ${metricsHtml}
-        </table>
-      `;
-    }
-
-    if (brokenHtml) {
-      content += `
-        <div style="color:var(--c-crimson); font-size:0.7rem; font-weight:700; margin-top:6px;">TRIPPED DEPENDENCIES (CATALOG SCAN):</div>
-        <table class="term-ascii-table">
-          <tr><th>Object</th><th>Type</th><th>Impact</th></tr>
-          ${brokenHtml}
-        </table>
-      `;
-    }
-
-    content += `<div class="term-integrity-badge">INTERLOCK ACTIVE: PostgreSQL ROLLBACK executed. Live database pristine.</div>`;
-
-    box.innerHTML = content;
-    terminalOutput.appendChild(box);
-  }
-
-  function scrollTerminalToBottom(): void {
-    terminalScreen.scrollTop = terminalScreen.scrollHeight;
-  }
-
-  /**
-   * Render Right-Hand Analog Rack
-   */
-  function renderDashboard(report: ImpactReport): void {
-    metaSql.textContent = report.statement;
-    metaType.textContent = report.statement_type || "UNKNOWN";
-    metaTime.textContent = `${report.execution_time_ms || 0} ms`;
-
-    if (report.status === "ERROR") {
-      reportStatusBadge.className = "tally-pill pill-rejected";
-      reportStatusBadge.textContent = "TRIPPED";
-      metaMode.textContent = "HALTED (SAFETY INTERLOCK)";
-      metaMode.style.color = "var(--c-crimson)";
-    } else if (report.status === "VERIFIED_PRISTINE") {
-      reportStatusBadge.className = "tally-pill pill-verified";
-      reportStatusBadge.textContent = "VERIFIED";
-      metaMode.textContent = "DIRECT READ ONLY";
-      metaMode.style.color = "var(--c-mint)";
-    } else {
-      reportStatusBadge.className = "tally-pill pill-simulated";
-      reportStatusBadge.textContent = "SIMULATED";
-      metaMode.textContent = "REPEATABLE READ (ROLLED BACK)";
-      metaMode.style.color = "var(--c-mint)";
-    }
-
-    renderTablesAffected(report.tables_affected || []);
-
-    if (report.statement_type === "DDL_SCHEMA_CHANGE") {
-      metricsSection.style.display = "none";
-      schemaSection.style.display = "block";
-      renderSchemaDependencies(report.broken_dependencies || []);
-    } else {
-      metricsSection.style.display = "flex";
-      schemaSection.style.display = "none";
-      renderMetrics(report.metrics || [], report.status);
-    }
-  }
-
-  function renderTablesAffected(tables: TableAffected[]): void {
-    tablesAffectedList.innerHTML = "";
-    if (tables.length === 0) {
-      tablesAffectedList.innerHTML = `<div class="ledger-empty">Zero physical rows modified in database storage.</div>`;
-      totalRowsBadge.textContent = "0 ROWS";
-      return;
-    }
-
-    let totalRows = 0;
-    tables.forEach(t => {
-      totalRows += (t.rows_changed || 0);
-      const row = document.createElement("div");
-      row.className = "ledger-row-item";
-
-      let actionClass = "deleted";
-      if (t.action && t.action.includes("CASCADE")) actionClass = "cascade";
-      else if (t.action && t.action.includes("UPDATE")) actionClass = "updated";
-
-      row.innerHTML = `
-        <span class="ledger-tbl-name">${escapeHtml(t.table)}</span>
-        <div class="ledger-tags">
-          <span class="action-tag ${actionClass}">${escapeHtml(t.action || 'MODIFIED')}</span>
-          <span>${t.rows_changed || 0} rows</span>
-        </div>
-      `;
-      tablesAffectedList.appendChild(row);
-    });
-
-    totalRowsBadge.textContent = `${totalRows} ROWS`;
-  }
-
-  function renderMetrics(metrics: MetricItem[], status: string): void {
-    attBefore.textContent = "—";
-    attAfter.textContent = "—";
-    attendanceDeltaBadge.textContent = "0.0%";
-    attendanceDeltaBadge.className = "delta-tag neutral";
-    attendanceBar.style.width = "0%";
-    attendanceBar.className = "vu-led-segments";
-
-    eligBefore.textContent = "—";
-    eligBefore.className = "gate-tally neutral";
-    eligAfter.textContent = "—";
-    eligAfter.className = "gate-tally neutral";
-    eligReason.textContent = "Evaluated against VIT 75% attendance rule.";
-    eligibilityStatusBadge.textContent = "—";
-    eligibilityStatusBadge.className = "status-tally-pill neutral";
-
-    cgpaBefore.textContent = "—";
-    cgpaAfter.textContent = "—";
-    cgpaDeltaBadge.textContent = "0.00";
-    cgpaDeltaBadge.className = "delta-tag neutral";
-    cgpaNote.textContent = "Calculated across active course credit weights in marks table.";
-
-    if (status === "VERIFIED_PRISTINE") {
-      const live = metrics.find(m => m.metric === "live_data_state");
-      if (live && live.current_attendance_pct !== undefined && live.current_cgpa !== undefined) {
-        attBefore.textContent = `${live.current_attendance_pct}%`;
-        attAfter.textContent = `${live.current_attendance_pct}%`;
-        attendanceDeltaBadge.textContent = "LIVE DATA";
-        attendanceDeltaBadge.className = "delta-tag positive";
-        attendanceBar.style.width = `${Math.min(live.current_attendance_pct, 100)}%`;
-
-        eligBefore.textContent = live.exam_eligibility || "ELIGIBLE";
-        eligBefore.className = "gate-tally eligible";
-        eligAfter.textContent = live.exam_eligibility || "ELIGIBLE";
-        eligAfter.className = "gate-tally eligible";
-        eligReason.textContent = "Direct audit of live PostgreSQL storage. Pristine.";
-
-        cgpaBefore.textContent = live.current_cgpa.toFixed(2);
-        cgpaAfter.textContent = live.current_cgpa.toFixed(2);
-        cgpaDeltaBadge.textContent = "PRISTINE";
-        cgpaDeltaBadge.className = "delta-tag positive";
-        cgpaNote.textContent = `Student: ${live.student_name} (ID: ${live.student_id})`;
-      }
-      return;
-    }
-
-    metrics.forEach(m => {
-      if (m.metric === "attendance_percentage") {
-        const b = typeof m.before === "number" ? m.before.toFixed(1) : String(m.before || "—");
-        const a = typeof m.after === "number" ? m.after.toFixed(1) : String(m.after || "—");
-        attBefore.textContent = `${b}%`;
-        attAfter.textContent = `${a}%`;
-
-        if (typeof m.change === "number") {
-          const changeVal = m.change.toFixed(1);
-          attendanceDeltaBadge.textContent = `${m.change > 0 ? '+' : ''}${changeVal}%`;
-          if (m.change < 0) attendanceDeltaBadge.className = "delta-tag negative";
-          else if (m.change > 0) attendanceDeltaBadge.className = "delta-tag positive";
-        }
-
-        if (typeof m.after === "number") {
-          attendanceBar.style.width = `${Math.min(m.after, 100)}%`;
-          if (m.after < 75) {
-            attendanceBar.className = "vu-led-segments danger";
-          } else {
-            attendanceBar.className = "vu-led-segments";
-          }
-        }
-      }
-
-      if (m.metric === "exam_eligibility") {
-        eligBefore.textContent = String(m.before || "—");
-        eligBefore.className = `gate-tally ${m.before === "ELIGIBLE" ? "eligible" : "ineligible"}`;
-
-        eligAfter.textContent = String(m.after || "—");
-        eligAfter.className = `gate-tally ${m.after === "ELIGIBLE" ? "eligible" : "ineligible"}`;
-
-        eligReason.textContent = m.reason || (m.change === "FLIPPED_TO_NO" ? "Attendance fell below 75% requirement." : "Eligibility unchanged.");
-        eligibilityStatusBadge.textContent = m.change === "FLIPPED_TO_NO" ? "FLIPPED TO NO" : "UNCHANGED";
-        eligibilityStatusBadge.className = m.change === "FLIPPED_TO_NO" ? "status-tally-pill warn" : "status-tally-pill neutral";
-      }
-
-      if (m.metric === "cgpa") {
-        const b = typeof m.before === "number" ? m.before.toFixed(2) : String(m.before || "—");
-        const a = typeof m.after === "number" ? m.after.toFixed(2) : String(m.after || "—");
-        cgpaBefore.textContent = b;
-        cgpaAfter.textContent = a;
-
-        if (typeof m.change === "number") {
-          const changeVal = m.change.toFixed(2);
-          cgpaDeltaBadge.textContent = `${m.change > 0 ? '+' : ''}${changeVal}`;
-          if (m.change < 0) cgpaDeltaBadge.className = "delta-tag negative";
-          else if (m.change > 0) cgpaDeltaBadge.className = "delta-tag positive";
-        }
-
-        if (m.reason) cgpaNote.textContent = m.reason;
-      }
-    });
-  }
-
-  function renderSchemaDependencies(deps: BrokenDependency[]): void {
-    brokenDependenciesList.innerHTML = "";
-    brokenCountBadge.textContent = `${deps.length} FAULTS`;
-
-    if (deps.length === 0) {
-      brokenDependenciesList.innerHTML = `<div class="ledger-empty">Zero reverse dependency faults detected in catalogs.</div>`;
-      return;
-    }
-
-    deps.forEach(d => {
-      const item = document.createElement("div");
-      item.className = "fault-row-item";
-      item.innerHTML = `
-        <div>
-          <span class="fault-name">${escapeHtml(d.object_name)}</span>
-          <span class="fault-type">[${escapeHtml(d.object_type)}]</span>
-        </div>
-        <div class="fault-reason">${escapeHtml(d.reason)}</div>
-      `;
-      brokenDependenciesList.appendChild(item);
-    });
-  }
-
-  function escapeHtml(str: string): string {
-    if (!str) return "";
-    return str
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
+  text('scenario-hint', hints[index] + (querySet.value === 'review'
+    ? ' Review queries use the original demo schema; select Delivered schema for live DML.'
+    : ' Uses the delivered enrollment-based schema. Offline fallback shows illustrative review fixtures.'));
+  lineNumbers();
+}
+tracks.forEach((button, i) => button.addEventListener('click', () => cue(i)));
+querySet.addEventListener('change', () => cue(selected));
+input.addEventListener('input', () => {
+  lineNumbers();
+  tracks.forEach(button => { button.classList.remove('active'); button.setAttribute('aria-pressed', 'false'); });
+});
+input.addEventListener('scroll', () => { el('line-numbers').scrollTop = input.scrollTop; });
+input.addEventListener('keydown', event => {
+  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    (el('query-form') as HTMLFormElement).requestSubmit();
   }
 });
+
+function cellRow(values: string[], parent: HTMLElement): void {
+  const row = document.createElement('tr');
+  values.forEach(value => { const cell = document.createElement('td'); cell.textContent = value; row.append(cell); });
+  parent.append(row);
+}
+function emptyRow(message: string, columns: number, parent: HTMLElement): void {
+  const row = document.createElement('tr');
+  const cell = document.createElement('td');
+  cell.colSpan = columns; cell.className = 'empty'; cell.textContent = message; row.append(cell); parent.append(row);
+}
+function display(value: unknown): string {
+  return typeof value === 'number' ? value.toFixed(2) : value == null ? '—' : String(value);
+}
+function delta(value: unknown): string {
+  return typeof value === 'number' ? `${value > 0 ? '+' : ''}${value.toFixed(2)}` : display(value);
+}
+function context(metric: MetricItem): string {
+  return `Student ${metric.student_id ?? '—'}${metric.course_code ? ' / ' + metric.course_code : ''}`;
+}
+function resetMetrics(): void {
+  ['att-before', 'att-after', 'attendance-delta', 'elig-before', 'score-before', 'score-after', 'score-delta'].forEach(id => text(id, '—'));
+  text('elig-after', 'NOT EVALUATED'); el('elig-after').className = 'pill';
+  text('score-title', 'CGPA DELTA'); text('score-note', 'No CGPA metric supplied.');
+  text('attendance-context', 'No attendance metric supplied.');
+  el('attendance-bar').replaceChildren(); el('attendance-bar').style.width = '0%';
+  el('attendance-meter').removeAttribute('aria-valuenow');
+  el('attendance-meter').setAttribute('aria-valuetext', 'No attendance result');
+  el('metric-rows').replaceChildren();
+}
+function render(report: ImpactReport): void {
+  resetMetrics();
+  const offline = report.engine_backend === 'mock';
+  text('report-status', report.status === 'ERROR' ? 'EXECUTION REJECTED / FAILED' : offline ? 'OFFLINE DEMO' : 'SIMULATION COMPLETE');
+  text('backend', offline ? 'BACKEND / OFFLINE FIXTURES' : 'BACKEND / LIVE POSTGRESQL');
+  text('execution-time', `${report.execution_time_ms.toFixed(2)} ms`);
+  text('report-message', report.error_message ?? (offline
+    ? 'PostgreSQL unavailable. Illustrative fixture data only; your SQL was not executed.'
+    : 'Results captured inside a repeatable-read transaction.'));
+  const tables = el('table-rows'); tables.replaceChildren();
+  report.tables_affected.forEach(table => cellRow([table.table, table.action ?? 'CHANGED', String(table.rows_changed)], tables));
+  if (!report.tables_affected.length) emptyRow(report.status === 'ERROR' ? 'No successful changes reported.' : 'No changed relations reported.', 3, tables);
+  text('row-count', `${report.tables_affected.reduce((sum, table) => sum + table.rows_changed, 0)} ROWS`);
+  report.metrics.forEach(metric => cellRow([context(metric), metric.metric, display(metric.before), display(metric.after), delta(metric.change)], el('metric-rows')));
+  if (!report.metrics.length) emptyRow('No academic metric changes reported.', 5, el('metric-rows'));
+  // Summary panels show one subject; the full table retains every changed student/course.
+  const attendance = report.metrics.find(m => m.metric === 'attendance_percentage');
+  const eligibility = report.metrics.find(m => m.metric === 'exam_eligibility' && (!attendance || (m.student_id === attendance.student_id && m.course_code === attendance.course_code)));
+  const score = report.metrics.find(m => m.metric === 'cgpa' || m.metric === 'weighted_average_score');
+  if (attendance) {
+    text('att-before', display(attendance.before)); text('att-after', display(attendance.after));
+    text('attendance-delta', delta(attendance.change)); text('attendance-context', context(attendance) + ' / % attendance');
+    if (typeof attendance.after === 'number') {
+      const percent = Math.max(0, Math.min(100, attendance.after));
+      const bar = el('attendance-bar'); bar.style.width = `${percent}%`;
+      for (let i = 0; i < Math.ceil(percent / 2.5); i++) { const segment = document.createElement('span'); segment.className = 'segment'; if (percent < 75) segment.style.background = 'var(--red)'; bar.append(segment); }
+      el('attendance-meter').setAttribute('aria-valuenow', String(percent));
+      el('attendance-meter').setAttribute('aria-valuetext', `${percent}% attendance`);
+    }
+  }
+  if (eligibility) {
+    text('elig-before', display(eligibility.before)); text('elig-after', display(eligibility.after));
+    el('elig-after').className = `pill ${eligibility.after === 'ELIGIBLE' ? 'positive' : eligibility.after === 'INELIGIBLE' ? 'negative' : ''}`;
+  }
+  if (score) {
+    text('score-title', score.metric === 'cgpa' ? 'CGPA DELTA' : 'WEIGHTED SCORE DELTA');
+    text('score-before', display(score.before)); text('score-after', display(score.after)); text('score-delta', delta(score.change));
+    text('score-note', context(score) + (score.metric === 'cgpa' ? ' / credit-weighted CGPA' : ' / score out of 100, not institutional CGPA'));
+  }
+  const dependencies = el('dependencies'); dependencies.replaceChildren();
+  text('dependency-count', `${report.broken_dependencies.length} REPORTED`);
+  report.broken_dependencies.forEach(dep => {
+    const block = document.createElement('div'); block.className = 'dependency';
+    const title = document.createElement('strong'); title.textContent = `${dep.object_type} / ${dep.object_name}`;
+    const reason = document.createElement('p'); reason.textContent = dep.reason; block.append(title, reason); dependencies.append(block);
+  });
+  if (!report.broken_dependencies.length) {
+    const note = document.createElement('p'); note.className = 'empty';
+    note.textContent = offline ? 'No dependency alerts in this fixture.' : 'Catalog tracing is not available in the live DML engine.';
+    dependencies.append(note);
+  }
+  text('execution-log', report.logs.join('\n'));
+  text('interlock-label', offline ? 'INTERLOCK / OFFLINE' : report.rolled_back ? 'INTERLOCK / ROLLED BACK' : 'INTERLOCK / UNCONFIRMED');
+  text('interlock-message', offline ? 'Zero database writes: no SQL was executed.' : report.rolled_back ? 'Transaction changes discarded. Rollback confirmed by PostgreSQL.' : 'No successful rollback claim is made for this result.');
+}
+
+el('query-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (busy) return;
+  const sql = input.value.trim();
+  if (!sql) { text('report-message', 'Enter a SQL statement first.'); input.focus(); return; }
+  busy = true; execute.disabled = true; querySet.disabled = true; tracks.forEach(button => button.disabled = true);
+  document.querySelector('.results')?.setAttribute('aria-busy', 'true');
+  text('report-status', 'RUNNING'); text('interlock-label', 'INTERLOCK / PENDING'); text('interlock-message', 'Awaiting response.');
+  try {
+    const response = await fetch('/api/whatif', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }), signal: AbortSignal.timeout(15000) });
+    if (!response.ok) throw new Error(`Request failed (HTTP ${response.status}).`);
+    const report: ImpactReport = await response.json();
+    if (!Array.isArray(report.metrics) || !Array.isArray(report.tables_affected) || !Array.isArray(report.broken_dependencies) || !Array.isArray(report.logs) || typeof report.execution_time_ms !== 'number') throw new Error('The server returned an invalid impact report.');
+    render(report);
+  } catch (error) {
+    resetMetrics();
+    text('report-status', 'REQUEST FAILED'); text('report-message', error instanceof Error ? error.message : 'Unable to reach the server.');
+    text('backend', 'BACKEND / RESPONSE UNAVAILABLE'); text('execution-time', '— ms');
+    el('table-rows').replaceChildren(); emptyRow('No result received.', 3, el('table-rows'));
+    text('row-count', '— ROWS'); text('dependencies', 'No result received.'); text('dependency-count', '—');
+    text('execution-log', 'Request failed; server outcome is unknown.');
+    text('interlock-label', 'INTERLOCK / UNCONFIRMED'); text('interlock-message', 'No response received. Database outcome is unknown.');
+  } finally {
+    busy = false; execute.disabled = false; querySet.disabled = false; tracks.forEach(button => button.disabled = false);
+    document.querySelector('.results')?.setAttribute('aria-busy', 'false');
+  }
+});
+cue(0);
