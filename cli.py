@@ -71,6 +71,10 @@ def format_impact_report(report: Dict[str, Any], show_json: bool = False):
     if status == "ERROR":
         print(f"│ {Colors.BOLD}Status:{Colors.ENDC}          {Colors.FAIL}{Colors.BOLD}REJECTED (SAFETY FILTER){Colors.ENDC}")
         print(f"│ {Colors.BOLD}Error:{Colors.ENDC}           {Colors.FAIL}{report.get('error_message', 'Validation error')}{Colors.ENDC}")
+    elif report.get("engine_backend") == "mock":
+        print(f"│ {Colors.BOLD}Status:{Colors.ENDC}          {Colors.WARNING}OFFLINE FIXTURE — NO DATABASE WRITE{Colors.ENDC}")
+    elif status == "COMMITTED" and report.get("committed"):
+        print(f"│ {Colors.BOLD}Status:{Colors.ENDC}          {Colors.WARNING}COMMITTED / PERMANENT{Colors.ENDC}")
     elif status == "VERIFIED_PRISTINE":
         print(f"│ {Colors.BOLD}Status:{Colors.ENDC}          {Colors.GREEN}{Colors.BOLD}VERIFIED PRISTINE{Colors.ENDC}")
     else:
@@ -158,6 +162,7 @@ def format_impact_report(report: Dict[str, Any], show_json: bool = False):
 
     # 6. Integrity Note
     message = ("Offline fixture: no SQL executed." if report.get("engine_backend") == "mock" else
+               "Permanent commit confirmed by PostgreSQL." if report.get("committed") else
                "Transaction rollback confirmed." if report.get("rolled_back") else "Rollback not confirmed.")
     print(f"\n{Colors.GREEN}Interlock:{Colors.ENDC} {message}")
 

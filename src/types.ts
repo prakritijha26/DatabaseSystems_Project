@@ -12,6 +12,7 @@ export type StatementType =
   | "UNKNOWN";
 
 export type SimulationStatus = 
+  | "COMMITTED"
   | "SIMULATED"
   | "VERIFIED_PRISTINE"
   | "ERROR";
@@ -58,6 +59,14 @@ export interface ImpactReport {
   logs: string[];
   engine_backend?: string;
   rolled_back?: boolean;
+  committed?: boolean;
+  commit_scope?: "postgresql" | "mock";
+  interlock_message?: string;
+  message?: string;
+  ddl_mode?: string;
+  query_columns?: string[];
+  query_rows?: (string | number | boolean | null)[][];
+  query_truncated?: boolean;
 }
 
 export interface ReviewTrackScenario {

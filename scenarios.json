@@ -1,0 +1,8 @@
+[
+  {"number":1,"id":"1","title":"Attendance deletion / eligibility flip","description":"Remove attendance for enrollment 1: 75% becomes 0%, YES becomes NO; the outer rollback restores the row.","sql":"WHAT_IF DELETE FROM attendance WHERE enrollment_id = 1;"},
+  {"number":2,"id":"2","title":"Mark update / weighted demonstration GPA","description":"Change enrollment 1 score to 45. Recompute credit-weighted score and demonstration GPA; audit rows also roll back.","sql":"WHAT_IF UPDATE marks SET score = 45 WHERE enrollment_id = 1;"},
+  {"number":3,"id":"3","title":"Enrollment deletion / foreign-key cascade","description":"Delete enrollment 1 and observe one attendance row and one mark row cascade within the snapshot.","sql":"WHAT_IF DELETE FROM enrollments WHERE enrollment_id = 1;"},
+  {"number":4,"id":"4","title":"Drop score / catalog dependencies","description":"Inspect views and triggers, attempt DROP COLUMN, and explicitly preview CASCADE if RESTRICT blocks it; restore the schema.","sql":"WHAT_IF ALTER TABLE marks DROP COLUMN score;"},
+  {"number":5,"id":"5","title":"Safety rejection / COMMIT","description":"Reject transaction control before opening a database connection.","sql":"WHAT_IF COMMIT;"},
+  {"number":6,"id":"6","title":"Read-only baseline verification","description":"Read restored live GPA and score. The tests separately compare full table and catalog fingerprints across simulations.","sql":"SELECT student_id, student_name, weighted_average_score, weighted_gpa FROM student_performance WHERE student_id = 1001;"}
+]

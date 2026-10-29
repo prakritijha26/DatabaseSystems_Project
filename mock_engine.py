@@ -17,6 +17,42 @@ SCENARIO_5_SQL = "WHAT_IF COMMIT;"
 SCENARIO_6_SQL = "SELECT student_id, name, attendance_pct, cgpa, exam_eligible FROM student_summary_view WHERE student_id = 1042;"
 
 def run_whatif(sql: str) -> Dict[str, Any]:
+    """Provide illustrative reports; mock acknowledgements never persist data."""
+    if re.fullmatch(r"\s*(?:RESEED|RESET)\s*;?\s*", sql, re.I):
+        return {"statement": sql, "statement_type": "DML", "status": "COMMITTED",
+                "committed": True, "commit_scope": "mock", "engine_backend": "mock", "rolled_back": False,
+                "execution_time_ms": 0.0, "tables_affected": [], "metrics": [], "broken_dependencies": [],
+                "message": "Offline reset acknowledgement only; no PostgreSQL data restored.",
+                "logs": ["[OFFLINE] Static sample fixtures remain available. No database data changed."]}
+    if re.match(r"\s*APPLY\s+", sql, re.I):
+        statement = re.sub(r"^\s*APPLY\s+", "", sql, count=1, flags=re.I)
+        try:
+            from engine import validate_statement
+        except ModuleNotFoundError:
+            validate_statement = None
+        if validate_statement is not None:
+            try:
+                validate_statement(sql)
+            except ValueError as exc:
+                return {"statement": sql, "statement_type": "REJECTED", "status": "ERROR",
+                        "committed": False, "rolled_back": False, "engine_backend": "mock",
+                        "execution_time_ms": 0.0, "tables_affected": [], "metrics": [],
+                        "broken_dependencies": [], "logs": [str(exc)], "error_message": str(exc)}
+        elif not re.match(r"(?:UPDATE|DELETE\s+FROM|INSERT\s+INTO|ALTER\s+TABLE|DROP\s+TABLE)\s+(?:public\.)?(?:students|courses|enrollments|attendance|marks)\b", statement, re.I):
+            return {"statement": sql, "statement_type": "REJECTED", "status": "ERROR",
+                    "committed": False, "rolled_back": False, "execution_time_ms": 0.0,
+                    "tables_affected": [], "metrics": [], "broken_dependencies": [],
+                    "logs": [], "error_message": "APPLY requires a supported university-table mutation."}
+        report = fixture_report("WHAT_IF " + statement)
+        report.update(statement=sql, engine_backend="mock", rolled_back=False)
+        if report["status"] != "ERROR":
+            report.update(status="COMMITTED", committed=True, commit_scope="mock")
+        report["logs"] = ["[OFFLINE] Illustrative APPLY acknowledgement only. No SQL executed or data persisted."]
+        return report
+    return fixture_report(sql)
+
+
+def fixture_report(sql: str) -> Dict[str, Any]:
     """
     Executes a WHAT_IF statement or plain verification query and returns an ImpactReport dictionary.
     Contract matches README.md and Project Plan specifications.
@@ -79,11 +115,41 @@ def run_whatif(sql: str) -> Dict[str, Any]:
 
     # Scenario 6: Plain SELECT query (Verification)
     if sql_upper.startswith("SELECT"):
+        if "STUDENTS" in sql_upper:
+            query_cols = ["student_id", "student_name", "department", "year_of_study"]
+            query_rows = [
+                [1001, "Student 1001", "CSE", 2],
+                [1002, "Student 1002", "CSE-DS", 2],
+                [1003, "Student 1003", "CSE", 2],
+                [1004, "Student 1004", "CSE-DS", 2],
+                [1005, "Student 1005", "CSE", 2],
+            ]
+        elif "COURSES" in sql_upper:
+            query_cols = ["course_id", "course_code", "course_name", "credits"]
+            query_rows = [
+                [1, "DS201", "Probability and Statistics", 4],
+                [2, "CS202", "Database Systems", 4],
+                [3, "CS203", "Computer Networks", 4],
+                [4, "DS204", "Exploratory Data Analysis", 4],
+                [5, "CS205", "Java Programming", 2],
+            ]
+        else:
+            query_cols = ["student_id", "student_name", "weighted_average_score", "weighted_gpa"]
+            query_rows = [
+                [1001, "Student 1001", 72.44, 7.89],
+                [1002, "Student 1002", 68.25, 7.20],
+                [1003, "Student 1003", 81.50, 8.65],
+                [1004, "Student 1004", 75.00, 8.00],
+                [1042, "Aarav Sharma", 82.50, 8.74],
+            ]
+
         return {
             "statement": sql,
             "statement_type": "VERIFICATION_SELECT",
             "status": "VERIFIED_PRISTINE",
             "tables_affected": [],
+            "query_columns": query_cols,
+            "query_rows": query_rows,
             "metrics": [
                 {
                     "metric": "live_data_state",
@@ -102,6 +168,38 @@ def run_whatif(sql: str) -> Dict[str, Any]:
                 "[STATUS] Zero persistent mutations recorded."
             ],
             "execution_time_ms": 3.8
+        }
+
+    # Support DROP TABLE
+    if "DROP TABLE" in sql_upper:
+        target = "marks"
+        for t in ["marks", "attendance", "enrollments", "courses", "students"]:
+            if t in sql_upper.lower():
+                target = t
+                break
+        return {
+            "statement": sql,
+            "statement_type": "DDL_SCHEMA_CHANGE",
+            "status": "SIMULATED",
+            "tables_affected": [
+                {"table": target, "rows_changed": 0, "action": "TABLE_DROPPED (hypothetical)"}
+            ],
+            "metrics": [],
+            "broken_dependencies": [
+                {"object_name": f"public.{target}", "object_type": "TABLE", "reason": f"Hypothetical deletion of entire relation public.{target}.", "severity": "CRITICAL_BREAK"},
+                {"object_name": "public.attendance_eligibility", "object_type": "VIEW", "reason": f"View depends on relation public.{target}.", "severity": "CRITICAL_BREAK"},
+                {"object_name": "public.student_performance", "object_type": "VIEW", "reason": f"View depends on relation public.{target}.", "severity": "CRITICAL_BREAK"},
+                {"object_name": "public.trg_log_mark_change", "object_type": "TRIGGER", "reason": f"Trigger defined on table public.{target}.", "severity": "TRIGGER_INVALIDATED"}
+            ] if target in ["marks", "enrollments", "students"] else [
+                {"object_name": f"public.{target}", "object_type": "TABLE", "reason": f"Hypothetical deletion of entire relation public.{target}.", "severity": "CRITICAL_BREAK"}
+            ],
+            "logs": [
+                f"[1/4] [PARSE] Validated DDL statement: DROP TABLE {target}.",
+                f"[2/4] [CATALOG] Traced reverse dependencies in pg_depend/pg_rewrite.",
+                f"[3/4] [SIMULATE] Simulated DROP TABLE inside snapshot savepoint.",
+                f"[4/4] [ROLLBACK] Reverted transaction. Physical relation public.{target} remains pristine on disk."
+            ],
+            "execution_time_ms": 12.8
         }
 
     # Scenario 4: Schema Change (DROP COLUMN)

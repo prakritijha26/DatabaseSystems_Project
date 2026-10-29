@@ -4,7 +4,8 @@
  * Runs directly with Bun: bun run src/cli.ts [query]
  */
 
-import type { ImpactReport, TableAffected, MetricItem, BrokenDependency } from "./types";
+import type { ImpactReport } from "./types";
+import { createInterface } from "node:readline";
 
 // Lospec Revival Palette (24-bit Truecolor ANSI)
 export const C = {
@@ -21,22 +22,30 @@ export const C = {
 };
 
 export async function executeQuery(sql: string): Promise<ImpactReport> {
-  // First attempt: call local running backend API
+  const permanent = /^\s*(?:APPLY\s+|(?:RESEED|RESET)\s*;?\s*$)/i.test(sql);
+  // Permanent commands are never replayed after an ambiguous HTTP result.
   try {
-    const res = await fetch("http://127.0.0.1:8000/api/whatif", {
+    const res = await fetch(process.env.WHATIF_API_URL ?? "http://127.0.0.1:8000/api/whatif", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sql })
+      body: JSON.stringify({ sql }),
+      signal: AbortSignal.timeout(15000)
     });
     if (res.ok) {
-      return (await res.json()) as ImpactReport;
+      const report = (await res.json()) as ImpactReport;
+      if (process.env.WHATIF_REQUIRE_LIVE === "1" && report.engine_backend !== "live") throw new Error("Live mode requires PostgreSQL.");
+      return report;
     }
-  } catch {
-    // Backend offline: invoke Python engine directly via Bun subprocess
+    throw new Error(`Backend returned HTTP ${res.status}.`);
+  } catch (error) {
+    const refused = (error as { code?: string })?.code === "ECONNREFUSED" ||
+      (error as { cause?: { code?: string } })?.cause?.code === "ECONNREFUSED";
+    if (permanent && !refused) throw new Error("Permanent command was not retried: server outcome may be unknown. Read back the data before retrying.");
+    // A refused connection was never delivered; otherwise only read/simulation requests may fall back.
   }
 
   const proc = Bun.spawn([
-    "python3",
+    process.env.WHATIF_PYTHON ?? "python3",
     "-c",
     `
 import json, sys
@@ -48,6 +57,7 @@ print(json.dumps(report))
   ]);
 
   const outputText = await new Response(proc.stdout).text();
+  if (await proc.exited !== 0) throw new Error("Python engine subprocess failed.");
   try {
     return JSON.parse(outputText.trim()) as ImpactReport;
   } catch (err) {
@@ -63,7 +73,7 @@ export function formatReport(report: ImpactReport, showJson = false): void {
 
   console.log(`\n${C.BOLD}┌── SIMULATION TELEMETRY // [${report.statement_type}] ─────────────────────────────────${C.RESET}`);
   console.log(`│ ${C.BOLD}SQL Statement:${C.RESET}    ${report.statement}`);
-  console.log(`│ ${C.BOLD}Engine Status:${C.RESET}    ${report.status === "ERROR" ? C.CRIMSON + "[TRIPPED / REJECTED]" : C.MINT + "[SIMULATED / SNAPSHOT]"} ${C.RESET}`);
+  console.log(`│ ${C.BOLD}Engine Status:${C.RESET}    ${report.status === "ERROR" ? C.CRIMSON + "[TRIPPED / REJECTED]" : report.engine_backend === "mock" ? C.GOLD + "[OFFLINE FIXTURE]" : report.status === "COMMITTED" && report.committed ? C.GOLD + "[COMMITTED / PERMANENT]" : C.MINT + "[SIMULATED / SNAPSHOT]"} ${C.RESET}`);
   console.log(`│ ${C.BOLD}Execution Time:${C.RESET}   ${report.execution_time_ms.toFixed(2)} ms`);
   console.log(`└──${"─".repeat(70)}`);
 
@@ -85,6 +95,16 @@ export function formatReport(report: ImpactReport, showJson = false): void {
   if (report.status === "ERROR") {
     console.log(`\n${C.CRIMSON}❌ Error:${C.RESET} ${report.error_message || "Validation error"}\n`);
     return;
+  }
+
+  if (report.query_columns) {
+    console.log(`\n${C.GOLD}Read-only SELECT result:${C.RESET}`);
+    const rows = (report.query_rows ?? []).map(row => row.map(value => value === null ? "NULL" : String(value)));
+    const widths = report.query_columns.map((column, i) => Math.max(column.length, ...rows.map(row => (row[i] ?? "").length)));
+    console.log(report.query_columns.map((column, i) => column.padEnd(widths[i])).join(" | "));
+    console.log(widths.map(width => "-".repeat(width)).join("-+-"));
+    for (const row of rows) console.log(row.map((value, i) => value.padEnd(widths[i])).join(" | "));
+    console.log(`${rows.length} row(s)${report.query_truncated ? " (truncated)" : ""}`);
   }
 
   // Relations modified
@@ -128,8 +148,8 @@ export function formatReport(report: ImpactReport, showJson = false): void {
     }
   }
 
-  const interlock = report.engine_backend === "mock" ? "Offline fixture: no SQL executed." : report.rolled_back ? "Transaction rollback confirmed." : "Rollback not confirmed.";
-  console.log(`\n${C.MINT}INTERLOCK:${C.RESET} ${interlock}\n`);
+  const interlock = report.engine_backend === "mock" ? "Offline fixture: no SQL executed." : report.status === "COMMITTED" && report.committed ? "Permanent commit confirmed by PostgreSQL. Data updated on disk." : report.rolled_back ? "Transaction rollback confirmed." : "Rollback not confirmed.";
+  console.log(`\n${report.committed ? C.GOLD : C.MINT}INTERLOCK:${C.RESET} ${interlock}\n`);
 }
 
 async function main() {
@@ -138,10 +158,33 @@ async function main() {
   const queryArgs = args.filter(a => a !== "--json");
 
   if (queryArgs.length === 0) {
-    console.log(`${C.CYAN}${C.BOLD}WHAT-IF DATABASE // TYPESCRIPT CLI DRIVER${C.RESET}`);
-    console.log(`${C.DIM}Usage: bun run src/cli.ts "WHAT_IF <sql>" [--json]${C.RESET}\n`);
-    console.log("Example:");
-    console.log('  bun run src/cli.ts "WHAT_IF DELETE FROM attendance WHERE student_id = 1042;"\n');
+    console.log(`${C.CYAN}${C.BOLD}WHAT-IF DATABASE // INTERACTIVE REPL${C.RESET}`);
+    console.log("WHAT_IF simulates; APPLY permanently commits; RESEED/RESET restores sample data. Each line executes one query.");
+    console.log("Type 'exit', 'quit', or '\\q' to exit. Up/Down recalls command history.");
+    const terminal = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal, removeHistoryDuplicates: true });
+    let closed = false;
+    rl.on('close', () => { closed = true; });
+    rl.setPrompt('whatif> ');
+    if (terminal) rl.prompt();
+    else process.stdout.write('whatif> ');
+    try {
+      for await (const line of rl) {
+        const sql = line.trim();
+        if (['exit', 'quit', '\\q'].includes(sql.toLowerCase())) break;
+        if (sql) {
+          try {
+            formatReport(await executeQuery(sql), showJson);
+          } catch (err: unknown) {
+            console.error(`${C.CRIMSON}[ERROR] ${err instanceof Error ? err.message : String(err)}${C.RESET}`);
+          }
+        }
+        if (terminal && !closed) rl.prompt();
+        else if (!terminal) process.stdout.write('whatif> ');
+      }
+    } finally {
+      rl.close();
+    }
     return;
   }
 

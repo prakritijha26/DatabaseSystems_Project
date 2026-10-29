@@ -19,44 +19,8 @@ interface DemoScenario {
   sql: string;
 }
 
-const DEMO_SCENARIOS: DemoScenario[] = [
-  {
-    number: 1,
-    title: "Attendance Deletion causing Eligibility Flip",
-    description: "Simulates deleting 14 attendance records for student 1042. Recomputed attendance falls below VIT's 75% threshold, flipping exam status from ELIGIBLE to INELIGIBLE.",
-    sql: "WHAT_IF DELETE FROM attendance WHERE student_id = 1042;"
-  },
-  {
-    number: 2,
-    title: "Mark Update causing CGPA Recalculation",
-    description: "Simulates adjusting student 1042's CSE202 score. The credit-weighted CGPA view re-evaluates inside snapshot isolation and reports the exact numerical delta.",
-    sql: "WHAT_IF UPDATE marks SET score = 45 WHERE student_id = 1042 AND course_id = 'CSE202';"
-  },
-  {
-    number: 3,
-    title: "Course Deregistration with Cascades (ON DELETE CASCADE)",
-    description: "Simulates removing a student from a course enrollment. Foreign key cascades automatically delete linked marks and attendance entries in the transaction snapshot.",
-    sql: "WHAT_IF DELETE FROM enrollments WHERE student_id = 1042 AND course_id = 'CSE202';"
-  },
-  {
-    number: 4,
-    title: "Hypothetical DDL with Schema Catalog Tracing (DROP COLUMN)",
-    description: "Simulates dropping column 'score' from table 'marks'. Queries pg_depend and pg_rewrite to list the broken views, triggers, and failing metric queries.",
-    sql: "WHAT_IF ALTER TABLE marks DROP COLUMN score;"
-  },
-  {
-    number: 5,
-    title: "Sandbox Security Violation (Attempted COMMIT Injection)",
-    description: "Simulates an adversarial attempt to commit a transaction or escape the sandbox. The AST validator intercepts and rejects the statement before snapshot acquisition.",
-    sql: "WHAT_IF COMMIT;"
-  },
-  {
-    number: 6,
-    title: "Post-Simulation Immutability Verification (Plain SELECT)",
-    description: "Shows the verification fixture offline; the current live DML engine rejects SELECT.",
-    sql: "SELECT student_id, name, attendance_pct, cgpa, exam_eligible FROM student_summary_view WHERE student_id = 1042;"
-  }
-];
+import scenarios from '../scenarios.json';
+const DEMO_SCENARIOS: DemoScenario[] = scenarios;
 
 function waitForKey(prompt: string): Promise<void> {
   const rl = readline.createInterface({
@@ -82,6 +46,7 @@ export async function runDemo(interactive = false): Promise<void> {
   console.log(`${C.CYAN}   Runtime: Bun + TypeScript Native Driver${C.RESET}`);
   console.log(`${C.BOLD}${C.CYAN}${"=".repeat(76)}${C.RESET}\n`);
 
+  let failures = 0;
   for (const sc of DEMO_SCENARIOS) {
     console.log(`\n${C.BOLD}${C.GOLD}${"=".repeat(76)}${C.RESET}`);
     console.log(`${C.BOLD}${C.GOLD} [SCENARIO ${sc.number}/6] ${sc.title.toUpperCase()}${C.RESET}`);
@@ -98,12 +63,15 @@ export async function runDemo(interactive = false): Promise<void> {
     try {
       const report = await executeQuery(sc.sql);
       formatReport(report);
+      if ((sc.number === 5 ? report.status !== "ERROR" : report.status === "ERROR") || (process.env.WHATIF_REQUIRE_LIVE === "1" && report.engine_backend !== "live")) failures++;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      failures++;
       console.error(`${C.CRIMSON}[ERROR] Failed to run scenario ${sc.number}: ${msg}${C.RESET}`);
     }
   }
 
+  if (failures) throw new Error(`${failures} review scenarios failed expectations.`);
   console.log(`\n${C.BOLD}${C.MINT}${"=".repeat(76)}${C.RESET}`);
   console.log(`${C.BOLD}${C.MINT}   ✅ DEMO RUN COMPLETE — REVIEW THE SIX REPORTS.${C.RESET}`);
   console.log(`${C.MINT}   Review each report for backend mode, errors, and rollback confirmation.${C.RESET}`);

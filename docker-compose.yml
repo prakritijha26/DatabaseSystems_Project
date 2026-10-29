@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: whatif_postgres
+    environment:
+      POSTGRES_DB: whatif_practice
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 25BDS0066
+    ports:
+      - "5432:5432"
+    volumes:
+      - whatif_pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d whatif_practice"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+volumes:
+  whatif_pgdata:

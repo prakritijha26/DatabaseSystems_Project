@@ -17,44 +17,10 @@ from cli import format_impact_report, Colors, BACKEND_NAME
 from app import run_whatif
 BACKEND_NAME = "Automatic live / labeled offline fallback"
 
-DEMO_SCENARIOS = [
-    {
-        "number": 1,
-        "title": "Attendance Deletion causing Eligibility Flip",
-        "description": "Simulates deleting 14 attendance records for student 1042. Recomputed attendance falls below VIT's 75% threshold, flipping exam status from ELIGIBLE to INELIGIBLE.",
-        "sql": "WHAT_IF DELETE FROM attendance WHERE student_id = 1042;"
-    },
-    {
-        "number": 2,
-        "title": "Mark Update causing CGPA Recalculation",
-        "description": "Simulates adjusting student 1042's CSE202 score. The credit-weighted CGPA view re-evaluates inside snapshot isolation and reports the exact numerical delta.",
-        "sql": "WHAT_IF UPDATE marks SET score = 45 WHERE student_id = 1042 AND course_id = 'CSE202';"
-    },
-    {
-        "number": 3,
-        "title": "Course Deregistration with Cascades (ON DELETE CASCADE)",
-        "description": "Simulates removing a student from a course enrollment. Foreign key cascades automatically delete linked marks and attendance entries in the transaction snapshot.",
-        "sql": "WHAT_IF DELETE FROM enrollments WHERE student_id = 1042 AND course_id = 'CSE202';"
-    },
-    {
-        "number": 4,
-        "title": "Hypothetical DDL with Schema Catalog Tracing (DROP COLUMN)",
-        "description": "Simulates dropping column 'score' from table 'marks'. Queries pg_depend and pg_rewrite to list the broken views, triggers, and failing metric queries.",
-        "sql": "WHAT_IF ALTER TABLE marks DROP COLUMN score;"
-    },
-    {
-        "number": 5,
-        "title": "Sandbox Security Violation (Attempted COMMIT Injection)",
-        "description": "Simulates an adversarial attempt to commit a transaction or escape the sandbox. The AST validator intercepts and rejects the statement before snapshot acquisition.",
-        "sql": "WHAT_IF COMMIT;"
-    },
-    {
-        "number": 6,
-        "title": "Post-Simulation Immutability Verification (Plain SELECT)",
-        "description": "Shows the verification fixture offline; the current live DML engine rejects SELECT.",
-        "sql": "SELECT student_id, name, attendance_pct, cgpa, exam_eligible FROM student_summary_view WHERE student_id = 1042;"
-    }
-]
+import json
+import os
+from pathlib import Path
+DEMO_SCENARIOS = json.loads(Path(__file__).with_name('scenarios.json').read_text())
 
 def run_demo(interactive: bool = False):
     print(f"\n{Colors.BOLD}{Colors.CYAN}{'=' * 76}{Colors.ENDC}")
@@ -63,6 +29,7 @@ def run_demo(interactive: bool = False):
     print(f"{Colors.CYAN}   Backend: {BACKEND_NAME}{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.CYAN}{'=' * 76}{Colors.ENDC}\n")
 
+    failures = 0
     for sc in DEMO_SCENARIOS:
         print(f"\n{Colors.BOLD}{Colors.HEADER}============================================================================{Colors.ENDC}")
         print(f"{Colors.BOLD}{Colors.HEADER} [SCENARIO {sc['number']}/6] {sc['title'].upper()}{Colors.ENDC}")
@@ -77,7 +44,11 @@ def run_demo(interactive: bool = False):
 
         report = run_whatif(sc["sql"])
         format_impact_report(report)
+        if (report["status"] != "ERROR" if sc["number"] == 5 else report["status"] == "ERROR") or (os.getenv("WHATIF_REQUIRE_LIVE") == "1" and report.get("engine_backend") != "live"):
+            failures += 1
 
+    if failures:
+        raise RuntimeError(f"{failures} review scenarios failed expectations.")
     print(f"\n{Colors.BOLD}{Colors.GREEN}{'=' * 76}{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.GREEN}   ✅ DEMO RUN COMPLETE — REVIEW THE SIX REPORTS.{Colors.ENDC}")
     print(f"{Colors.GREEN}   Review each report for backend mode, errors, and rollback confirmation.{Colors.ENDC}")

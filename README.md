@@ -1,255 +1,246 @@
-# What-If Database: Impact Analysis for University Databases
+# What-If Database
 
-**Course:** BACSE202 – Database Management Systems  
-**Institution:** Vellore Institute of Technology (VIT)  
-**Semester:** Fall Semester 2026  
+Preview SQL changes to a university database and inspect attendance, GPA, row counts and catalog dependencies. Hypothetical changes roll back; explicit `APPLY` commands commit. BACSE202 Database Management Systems, VIT, Fall 2026.
 
+## Requirements
 
----
+- Git and Python 3.11 or 3.12 (recommended).
+- PostgreSQL 15, through Docker Compose or a native installation.
+- Optional [Bun](https://bun.sh/docs/installation) for TypeScript CLI/builds/tests. The browser bundle is included, so Python alone runs the web app and Python CLI.
 
-## 📌 Project Overview
+Use a dedicated local sample database. The password below is a public development default. The app has no authentication: keep the web server on loopback, not exposed publicly.
 
-Testing what-if scenarios on production or operational databases typically requires cloning the database, manual before/after query scripting, or setting up complex branching systems. 
+## Windows — PowerShell
 
-**What-If Database** is a lightweight middleware layer built on top of **PostgreSQL** that introduces a custom `WHAT_IF` SQL command:
+Install [Python](https://www.python.org/downloads/windows/), [Git](https://git-scm.com/downloads/win) and [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/). Start Docker Desktop with Linux containers enabled. Open PowerShell:
+
+```powershell
+git clone https://github.com/prakritijha26/DatabaseSystems_Project.git
+cd DatabaseSystems_Project
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+docker compose up -d --wait
+$env:WHATIF_REQUIRE_LIVE = "1"
+.\.venv\Scripts\python.exe app.py
+```
+
+Open **http://127.0.0.1:8000**. Keep the terminal running; Ctrl+C stops it. Direct use of the virtual-environment executable avoids PowerShell activation-policy changes.
+
+In a second terminal, from the project folder:
+
+```powershell
+$env:WHATIF_REQUIRE_LIVE = "1"
+.\.venv\Scripts\python.exe cli.py "SELECT COUNT(*) FROM students;"
+.\.venv\Scripts\python.exe demo.py
+```
+
+## Linux — Bash
+
+On Ubuntu/Debian:
+
+```bash
+sudo apt update
+sudo apt install git python3 python3-venv python3-pip
+```
+
+Install [Docker Engine](https://docs.docker.com/engine/install/) and the [Compose plugin](https://docs.docker.com/compose/install/linux/), then start Docker. Other distributions should use their corresponding Python packages.
+
+```bash
+git clone https://github.com/prakritijha26/DatabaseSystems_Project.git
+cd DatabaseSystems_Project
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+docker compose up -d --wait
+export WHATIF_REQUIRE_LIVE=1
+.venv/bin/python app.py
+```
+
+Open **http://127.0.0.1:8000**; Ctrl+C stops the app. If Docker requires administrative access, use `sudo docker compose ...` for Docker only, not Python or pip.
+
+In a second terminal, from the project folder:
+
+```bash
+export WHATIF_REQUIRE_LIVE=1
+.venv/bin/python cli.py "SELECT COUNT(*) FROM students;"
+.venv/bin/python demo.py
+```
+
+## PostgreSQL through Docker
+
+Compose starts `postgres:15-alpine` as `whatif_postgres`, creates `whatif_practice`, then imports `schema.sql` and `seed.sql`. A named volume retains data.
+
+```bash
+docker compose ps
+docker compose exec postgres psql -U postgres -d whatif_practice -c "SELECT COUNT(*) FROM students;"
+docker compose stop
+docker compose up -d --wait
+```
+
+Expect **30 students**, five courses, and 150 rows each in enrollments, attendance and marks. `docker compose down` removes the container/network but retains the named volume.
+
+Initialization scripts run only on an empty data directory; restarts do not reseed or reset existing passwords. See the [official image documentation](https://hub.docker.com/_/postgres). **Adding `-v` to `down` deletes the database volume.**
+
+Do not run native and Docker PostgreSQL on the same port. If 5432 is occupied, change Compose's port mapping to `"5433:5432"` and set `PGPORT=5433` in the application terminal.
+
+## Native PostgreSQL instead of Docker
+
+Complete the Python setup above, skipping Docker commands. Initialize a new dedicated database: `schema.sql` recreates project objects and is not a migration for valuable existing data.
+
+### Windows
+
+Install PostgreSQL 15 and command-line tools using the [Windows installer](https://www.postgresql.org/download/windows/). Remember the postgres password and ensure the Windows service is running. From the project folder:
+
+```powershell
+$env:Path = "C:\Program Files\PostgreSQL\15\bin;" + $env:Path
+$env:PGHOST = "127.0.0.1"
+$env:PGPORT = "5432"
+$env:PGUSER = "postgres"
+$env:PGPASSWORD = Read-Host "PostgreSQL password"
+psql -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE whatif_practice;"
+psql -d whatif_practice -v ON_ERROR_STOP=1 -f schema.sql
+psql -d whatif_practice -v ON_ERROR_STOP=1 -f seed.sql
+$env:PGDATABASE = "whatif_practice"
+$env:WHATIF_REQUIRE_LIVE = "1"
+.\.venv\Scripts\python.exe app.py
+```
+
+Adjust the PostgreSQL installation path as necessary. Read-Host here takes a plain string for the process environment. If the database already exists, inspect it before importing.
+
+### Linux (Ubuntu/Debian)
+
+Use the [PostgreSQL packages for your distribution](https://www.postgresql.org/download/linux/). The distribution default may be newer than 15; Docker supplies the reproducible project version.
+
+```bash
+sudo apt install postgresql postgresql-client
+sudo systemctl start postgresql
+sudo -u postgres psql -c "CREATE DATABASE whatif_practice;"
+sudo -u postgres psql -c '\password postgres'
+```
+
+The last command prompts for a new password. From the project folder, use that same password:
+
+```bash
+export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=whatif_practice
+read -rsp 'PostgreSQL password: ' PGPASSWORD; echo
+export PGPASSWORD
+psql -v ON_ERROR_STOP=1 -f schema.sql
+psql -v ON_ERROR_STOP=1 -f seed.sql
+export WHATIF_REQUIRE_LIVE=1
+.venv/bin/python app.py
+```
+
+Without systemd, use your distribution's service manager. These connections use TCP authentication without changing local peer-authentication rules.
+
+## Configuration
+
+Set variables in the terminal that launches the app. **The application does not automatically load .env files.**
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| PGHOST | localhost | Database host |
+| PGPORT | 5432 | Database port |
+| PGDATABASE | whatif_practice | Dedicated database |
+| PGUSER | postgres | Database user |
+| PGPASSWORD | 25BDS0066 | Public demo password; override for native installs |
+| WHATIF_REQUIRE_LIVE | unset | Set to 1 to reject unavailable PostgreSQL instead of using fixtures |
+| WHATIF_PYTHON | python3 | Bun CLI subprocess interpreter |
+| WHATIF_API_URL | http://127.0.0.1:8000/api/whatif | Bun CLI HTTP endpoint |
+
+Pass `--port 8001` to app.py to change the web port; update WHATIF_API_URL for Bun clients. Missing engine dependencies or unavailable PostgreSQL otherwise select labeled offline fixtures. Mock results do not prove live execution or persist APPLY changes.
+
+## Usage
+
+Run cli.py without arguments for an interactive prompt, or pass one quoted statement. Add `--json` for the report. The browser uses the same adapter through POST /api/whatif with JSON `{"sql":"..."}`.
 
 ```sql
-WHAT_IF DELETE FROM attendance WHERE student_id = 1042;
+WHAT_IF DELETE FROM attendance WHERE enrollment_id = 1;
+WHAT_IF UPDATE marks SET score = 45 WHERE enrollment_id = 1;
+WHAT_IF DELETE FROM enrollments WHERE enrollment_id = 1;
+WHAT_IF ALTER TABLE marks DROP COLUMN score;
+SELECT student_id, weighted_average_score, weighted_gpa FROM student_performance WHERE student_id = 1001;
 ```
 
-It executes the hypothetical modification within a sandbox transaction that is **always rolled back**, evaluates derived metrics before and after the modification, and produces an exact **Impact Report** detailing:
-- Affected tables and rows changed (including foreign key cascades and triggers).
-- Attendance percentage shifts and exam eligibility status flips.
-- Cumulative Grade Point Average (CGPA) deltas.
-- For schema changes (e.g. `DROP COLUMN`): system catalog-derived lists of broken views, foreign keys, triggers, and failing metric queries.
+The six demonstrations are defined in scenarios.json. demo.py also demonstrates rejection of `WHAT_IF COMMIT;`.
 
-> **Important Framing:** This system performs **exact simulation**, not predictive modelling, statistical estimation, or machine learning. The real database is guaranteed to remain untouched.
+Supported mutations: INSERT, UPDATE, DELETE, DROP COLUMN and DROP TABLE on approved university tables. SELECT is restricted to approved relations/functions. Multiple statements, transaction control and unsupported SQL are rejected.
 
----
+### Saving changes deliberately
 
-## 🏗️ Architecture & Pipeline
-
-The execution follows a strict 6-step transactional pipeline:
-
-```
-[WHAT_IF SQL Input]
-         │
-         ▼
- 1. Parse & Validate ──────► [sqlglot: AST check & statement whitelist]
-         │
-         ▼
- 2. Baseline Metrics ──────► [Compute initial CGPA, Attendance %, Eligibility]
-         │
-         ▼
- 3. Transaction Sandbox ───► [BEGIN ISOLATION LEVEL REPEATABLE READ]
-         │                   [Execute statement (cascades & triggers fire)]
-         ▼
- 4. Re-run & Diff ─────────► [Savepoints per metric query; compute delta]
-         │
-         ▼
- 5. Guaranteed Rollback ───► [ROLLBACK in finally block — zero persistent side-effects]
-         │
-         ▼
- 6. Impact Report ─────────► [Format and return JSON / CLI summary]
+```sql
+WHAT_IF UPDATE marks SET score = 50 WHERE enrollment_id = 1;
+APPLY UPDATE marks SET score = 50 WHERE enrollment_id = 1;
+SELECT score FROM marks WHERE enrollment_id = 1;
 ```
 
-### Key Technical Pillars
-- **Snapshot Isolation (`REPEATABLE READ`):** Ensures a consistent snapshot view during simulation, preventing dirty reads and isolation anomalies.
-- **Savepoints for Fault Tolerance:** Each post-change metric runs inside an isolated savepoint so that a failure in one metric query does not abort the entire simulation.
-- **System Catalog Inspection:** Queries PostgreSQL internals (`pg_depend`, `pg_rewrite`, `pg_constraint`, `information_schema`) to identify schema dependencies that would break under hypothetical DDL.
+WHAT_IF rolls back; successful live APPLY commits. These are separate transactions: the preview does not reserve its snapshot for a later commit. DDL previews may explore CASCADE after RESTRICT fails; APPLY never automatically commits that expanded cascade.
 
----
+`RESEED;` (alias `RESET;`) transactionally replaces sample tables/views/audit function and restores seed data. It discards applied changes and can remove dependent objects through CASCADE. Use only in the dedicated sample database. After a lost APPLY response, inspect data before retrying: the commit may already have succeeded.
 
-## 🎯 Scope & Boundaries
+## Architecture and limitations
 
-### In Scope
-- **Data Statements:** `INSERT`, `UPDATE`, `DELETE`.
-- **Allowed Schema Changes (DDL):** `DROP COLUMN`, `ALTER COLUMN TYPE`, `DROP TABLE`, `DROP CONSTRAINT`, `RENAME`.
-- **Cascades & Business Logic:** Foreign key `ON DELETE CASCADE` actions and trigger executions inside the transaction.
-- **Exact Metric Comparison:** Before vs. After comparison of student attendance, CGPA, and exam eligibility (e.g., < 75% attendance threshold).
-- **Single-User Operational Environment:** University academic database prototype.
+Browser/CLI → app.py report adapter → engine.py validation and transaction → PostgreSQL.
 
-### Out of Scope
-- Machine learning, forecasting, or statistical approximations.
-- Multi-user concurrent simulation and lock contention management.
-- Arbitrary DDL outside the allowed whitelist.
-- Deep application-code tracing outside the database engine.
-- Production-grade access control and auth infrastructure.
+The engine captures before/after metrics inside REPEATABLE READ, uses savepoints for recoverable probes and rolls back hypothetical changes. dependencies.py inspects catalogs for views, triggers and constraints. verification.py fingerprints logical data/catalog state for tests.
 
----
+Students and courses connect through enrollments; attendance and marks reference enrollments with cascading foreign keys. attendance_eligibility applies the 75% threshold, student_performance calculates weighted score and demonstration GPA, and trg_log_mark_change logs score updates.
 
-## 🛡️ Safety & Validation Rules
+GPA bands are a demonstration policy, not official VIT grading rules. Rollback protects transactional logical state in the trusted sample schema; it does not imply zero physical disk/WAL writes or safety for arbitrary external triggers.
 
-- **Strict Command Whitelist:** Only permitted DML and listed DDL statements are processed.
-- **Rejection of Control Commands:** Explicitly rejects `COMMIT`, `ROLLBACK`, transaction control, and multi-statement queries.
-- **Rejection of Non-Transactional Statements:** Forbids commands that cannot run inside a standard transaction block (e.g., `CREATE INDEX CONCURRENTLY`, `VACUUM`).
-- **Pristine State Guarantee:** Every run executes inside a `try ... finally: conn.rollback()` block. Automated verification tests ensure the live database state remains identical before and after invocation.
+## Development and tests
 
----
+Linux:
 
-## 📂 Project Structure
-
-```text
-DatabaseSystems_Project/
-├── README.md                           # Project documentation and progress tracking
-├── app.py                              # Web interface server (FastAPI/Bottle HTTP server)
-├── web/                                # Web UI frontend assets
-│   ├── index.html                      # Single-page UI with terminal & dashboard
-│   ├── style.css                       # Modern dark developer workbench stylesheet
-│   └── app.js                          # Client-side terminal & interactive logic
-├── cli.py                              # Interactive CLI for running WHAT_IF queries
-├── demo.py                             # Automated evaluation runner for 6 review scenarios
-├── mock_engine.py                      # Contract-compliant offline simulation mock
-├── schema.sql                          # Database schema: tables, views, triggers, constraints
-├── seed.sql                            # Seed data: ~30 students, 4-5 courses, attendance, marks
-├── engine.py                           # Parser, transaction sandbox, baseline & diff runner
-├── dependencies.py                     # PostgreSQL catalog dependency inspector (pg_depend, etc.)
-├── tests/                              # Automated test suite
-│   ├── test_parser.py                  # Parser and validation tests
-│   ├── test_rollback.py                # State immutability & rollback guarantee tests
-│   └── test_scenarios.py               # End-to-end verification of demo scenarios
-└── docker-compose.yml                  # PostgreSQL container service definition (optional)
-```
-
----
-
-## 📊 Standard Impact Report Interface
-
-The engine returns an agreed JSON `ImpactReport` contract:
-
-```json
-{
-  "statement": "WHAT_IF DELETE FROM attendance WHERE student_id = 1042;",
-  "statement_type": "DML",
-  "status": "SIMULATED",
-  "tables_affected": [
-    {"table": "attendance", "rows_changed": 14}
-  ],
-  "metrics": [
-    {
-      "metric": "attendance_percentage",
-      "student_id": 1042,
-      "before": 78.5,
-      "after": 64.2,
-      "change": -14.3
-    },
-    {
-      "metric": "exam_eligibility",
-      "student_id": 1042,
-      "before": "ELIGIBLE",
-      "after": "INELIGIBLE",
-      "change": "FLIPPED_TO_NO"
-    }
-  ],
-  "broken_dependencies": []
-}
-```
-
----
-
-## 🧪 Demo Scenarios
-
-The system is evaluated against 6 core scenarios:
-
-1. **Attendance Drop & Eligibility Flip:** Delete attendance records for a student; attendance drops below 75% and exam eligibility flips from `ELIGIBLE` to `INELIGIBLE`.
-2. **Mark Change & CGPA Impact:** Update internal/exam marks; credit-weighted CGPA recalculated and difference displayed.
-3. **Course Deregistration Cascade:** Drop an enrollment record; cascading foreign keys automatically clean up marks and attendance.
-4. **Hypothetical DDL Impact:** Run `WHAT_IF ALTER TABLE marks DROP COLUMN score;`; report lists broken `student_cgpa_view` and failed dependent metrics without executing destructive changes on disk.
-5. **Safety Violation Rejection:** Attempt invalid inputs like `WHAT_IF COMMIT;` or SQL injection multi-statements, verifying prompt rejection.
-6. **Data Immutability Verification:** Run regular `SELECT` queries across all affected tables immediately after simulations to verify the live database is 100% pristine.
-
----
-
-## 🛠️ Tech Stack & Requirements
-
-- **Database:** PostgreSQL 14+ (Required for transactional DDL and dependency catalogs `pg_depend`, `pg_rewrite`)
-- **Language:** Python 3.10+
-- **Database Driver:** `psycopg` (v3)
-- **SQL Parser:** `sqlglot`
-- **Testing:** `pytest`
-
----
-
-## 🚀 Running the System (Part C: Interface & Demo)
-
-### 1. Launch Interactive Web UI (With On-Screen Terminal & Live Impact Dashboard)
 ```bash
-python3 app.py
-```
-Open [http://localhost:8000](http://localhost:8000) in your browser. Features:
-- Embedded interactive shell for typing `WHAT_IF` statements.
-- One-click preset buttons for all 6 review scenarios.
-- Side-by-side visual diff cards for attendance thresholds, exam eligibility badges, CGPA deltas, and broken schema dependencies.
-
-### 2. Launch Interactive Terminal CLI
-```bash
-# Start interactive shell:
-python3 cli.py
-
-# Or evaluate a one-shot query directly:
-python3 cli.py "WHAT_IF DELETE FROM attendance WHERE student_id = 1042;"
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python demo.py
 ```
 
-### 3. Run Automated Review Scenario Demo Suite
-```bash
-# Python runner:
-python3 demo.py
-# or with interactive pauses:
-python3 demo.py --interactive
+Windows:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe demo.py
 ```
-Executes all 6 official review scenarios with commentary and formats the resulting impact reports.
 
-### 4. TypeScript & Bun Workflow
+Use a disposable seeded test database. Live scenario tests can **skip** if the database is unavailable or unsuitable; passing with skips is not live verification. They generate ignored Review-2/evidence.json. Inspect report backend/status as well as exit codes when demonstrating strict live mode.
+
+Optional Bun commands:
+
 ```bash
-# Bundle frontend client:
-bun run build
-
-# Native TypeScript CLI:
-bun run cli "WHAT_IF DELETE FROM attendance WHERE student_id = 1042;"
-
-# Automated TypeScript Demo Suite:
+bun run build  # rebuild web/app.js after TypeScript changes
+bun run dev    # watch and rebuild
+bun test
+bun run cli
 bun run demo
-# or interactive:
-bun run demo --interactive
 ```
 
----
+Set the Bun interpreter on Linux with `export WHATIF_PYTHON="$PWD/.venv/bin/python"`. On Windows PowerShell use `$env:WHATIF_PYTHON = (Resolve-Path .\.venv\Scripts\python.exe).Path`. Keep database variables consistent between server and CLI.
 
-## 📈 Progress Tracker
+## Repository layout
 
-- [x] Review 1 Slides & Project Plan finalized
-- [x] Initial repository setup & README documentation
-- [x] Contract-compliant mock engine (`mock_engine.py`) for offline testing & demo
-- [x] Interactive CLI with formatted tables (`cli.py`)
-- [x] Web Interface with on-screen terminal & visual impact dashboard (`app.py`, `web/`)
-- [x] Automated review demo script for all 6 scenarios (`demo.py`)
-- [x] TypeScript migration for frontend & CLI drivers (`src/app.ts`, `src/cli.ts`, `src/demo.ts`)
-- [ ] PostgreSQL environment setup & connectivity
-- [ ] Database Schema (`schema.sql` with tables, cascades, views, triggers)
-- [ ] Seed Data (`seed.sql` with ~30 students, courses, attendance, marks)
-- [ ] Core Engine (`engine.py` with SQL parser, whitelist validator & rollback sandbox)
-- [ ] Metric Computation & Diff Logic (Attendance %, CGPA, Eligibility)
-- [ ] DDL Dependency Tracing (`dependencies.py` via `pg_depend` catalogs)
-- [ ] Unit Test Suite (`tests/`)
+| Files | Purpose |
+| --- | --- |
+| app.py, engine.py, dependencies.py, mock_engine.py | HTTP interface, live execution, catalog inspection, fixtures |
+| cli.py, demo.py, scenarios.json | Python CLI and shared demonstrations |
+| schema.sql, seed.sql, docker-compose.yml | Schema, sample data, PostgreSQL deployment |
+| requirements.txt | Pinned Python dependencies |
+| src/, web/, package.json, tsconfig.json | TypeScript source, prebuilt browser files, build configuration |
+| tests/, verification.py | Regression tests and logical-state checks |
+| start_demo.sh, start_postgres.sh, whatif.sh | Optional Bash helpers; cross-platform instructions use Python/Compose directly |
+| docs/ | Implementation decisions and known limitations |
 
-### Integrated web interface
+Coursework decks, reports, personal tool caches and old debug scripts are not required to run the app. Generated evidence and local environments are ignored. Keep web/app.js in version control so running the browser interface does not require Bun.
 
-Start `python3 app.py` and open `http://127.0.0.1:8000`. Rebuild the browser client with `bun run build` after changing `src/app.ts`.
+## Troubleshooting
 
-HTTP and both CLIs use the `app.run_whatif` adapter. If `psycopg`/`sqlglot` are missing or the database connection cannot be opened, reports explicitly identify **offline fixture data**. SQL validation and execution failures do not trigger mock fallback.
+- Connection refused: start PostgreSQL; check Compose status, PGHOST and PGPORT.
+- Authentication failure: match PGPASSWORD to the existing database user. Changing Compose configuration does not change an initialized volume's password.
+- Missing tables/wrong results: verify PGDATABASE and schema/seed initialization. Restarting does not reseed.
+- Port 8000 busy: use --port 8001 without killing unrelated processes.
+- Import errors: install requirements with the same virtual-environment Python used to launch the app.
+- Bun cannot find Python: set WHATIF_PYTHON or use the Python CLI.
+- Unexpected mock results: set WHATIF_REQUIRE_LIVE=1 and resolve the connection/dependency error.
 
-For the live engine, install `psycopg[binary]` and `sqlglot` in your Python environment and set `PGPASSWORD`. An explicit `engine.run_whatif(sql, password=...)` argument overrides the environment; the course demo password is the final local fallback. The database connection settings remain in `engine.DB_CONFIG`.
+## Contributors
 
-Select **Delivered schema** in the interface for enrollment-based DML examples compatible with `schema.sql` and `seed.sql`. The original review examples target a different schema. The delivered engine supports UPDATE, INSERT, and DELETE only: DDL dependency tracing and verification SELECT return rejection reports in live mode. Its academic view exposes weighted score, not institutional CGPA; the UI preserves that distinction. Rollback confirmation means transaction changes were discarded, not that PostgreSQL performed zero physical writes or reversed sequence advances.
-
-Verification:
-
-```sh
-python3 -m unittest discover -s tests -v
-python3 handoff/tests/verify_contract.py
-bun run demo
-python3 demo.py
-bun run build
-```
-
-Engine lifecycle tests require the live Python dependencies; otherwise those tests are reported as skipped. They exercise connection doubles and do not replace an integration test against an initialized PostgreSQL database.
+Prakriti Prakash Jha (25BDS0066), Kahill Manuel Alvares (25BCE2873), Himali Agarwal (25BAI0012).

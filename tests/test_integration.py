@@ -11,6 +11,11 @@ import app
 
 
 class AdapterTests(unittest.TestCase):
+    def setUp(self):
+        mode = patch.dict("os.environ", {"WHATIF_REQUIRE_LIVE": "0"})
+        mode.start()
+        self.addCleanup(mode.stop)
+
     def test_updates_use_rowcount_and_do_not_count_read_only_tables(self):
         report = app.normalize_report('WHAT_IF UPDATE marks ...', {
             'before': {'marks': 10, 'students': 5}, 'after': {'marks': 10, 'students': 5},
@@ -69,6 +74,14 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(report['status'], 'ERROR')
 
 
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+venv_site = ROOT / '.venv' / 'lib' / f'python{sys.version_info.major}.{sys.version_info.minor}' / 'site-packages'
+if venv_site.exists() and str(venv_site) not in sys.path:
+    sys.path.insert(0, str(venv_site))
+
 try:
     import engine
 except ModuleNotFoundError:
@@ -90,14 +103,19 @@ class EngineTests(unittest.TestCase):
         for phase in ('baseline', 'execute', 'after', 'rollback'):
             conn = Mock(); conn.execute.return_value.rowcount = 1
             counts = [RuntimeError('baseline')] if phase == 'baseline' else [{'marks': 2}, RuntimeError('after')] if phase == 'after' else [{'marks': 2}, {'marks': 2}]
-            if phase == 'execute': conn.execute.side_effect = [None, None, RuntimeError('execute')]
+            if phase == 'execute':
+                def execute(statement):
+                    if str(statement).startswith('UPDATE'):
+                        raise RuntimeError('execute')
+                    return Mock(rowcount=1)
+                conn.execute.side_effect = execute
             if phase == 'rollback': conn.rollback.side_effect = RuntimeError('rollback')
             with patch.object(engine.psycopg, 'connect', return_value=conn), patch.object(engine, 'get_metrics', side_effect=counts), patch.object(engine, 'get_academic_metrics', return_value={}):
                 with self.assertRaises(RuntimeError): engine.run_whatif('WHAT_IF UPDATE marks SET score = 45;')
             conn.rollback.assert_called_once(); conn.close.assert_called_once()
 
     def test_validation_precedes_connection(self):
-        for sql in ('WHAT_IF COMMIT;', 'WHAT_IF DELETE FROM marks; COMMIT;', 'WHAT_IF ALTER TABLE marks DROP COLUMN score;', 'WHAT_IF DELETE FROM other_table;'):
+        for sql in ('WHAT_IF COMMIT;', 'WHAT_IF DELETE FROM marks; COMMIT;', 'WHAT_IF ALTER TABLE marks ADD COLUMN bad INT;', 'WHAT_IF DELETE FROM other_table;'):
             with patch.object(engine.psycopg, 'connect') as connect:
                 with self.assertRaises(ValueError): engine.run_whatif(sql)
                 connect.assert_not_called()

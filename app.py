@@ -39,11 +39,15 @@ def error_report(sql, message, statement_type="UNKNOWN"):
 
 def normalize_report(sql, raw, elapsed_ms):
     """Translate counts and academic snapshots into the client contract."""
-    report = {"statement": sql, "statement_type": "DML",
+    report = {"statement": sql, "statement_type": raw.get("statement_type", "DML"),
               "status": "SIMULATED" if raw.get("rolled_back") is True else "ERROR",
               "execution_time_ms": elapsed_ms, "tables_affected": [], "metrics": [],
-              "broken_dependencies": [], "logs": [], "engine_backend": "live",
+              "broken_dependencies": raw.get("broken_dependencies", []), "logs": [], "engine_backend": "live",
               "rolled_back": raw.get("rolled_back") is True}
+    report["committed"] = raw.get("committed") is True
+    if report["committed"]:
+        report.update(status="COMMITTED", rolled_back=False, commit_scope="postgresql",
+                      interlock_message="Permanent write confirmed. Transaction committed to PostgreSQL.")
     before, after = raw.get("before", {}), raw.get("after", {})
     target = raw.get("target_table")
     names = set(before) | set(after) | set(raw.get("tables_affected", []))
@@ -56,9 +60,9 @@ def normalize_report(sql, raw, elapsed_ms):
         rows = raw.get("rows_affected", 0) if table == target else abs(delta)
         if table == target or delta:
             report["tables_affected"].append({"table": table, "rows_changed": max(0, rows),
-                "action": {"DELETE": "DELETED", "UPDATE": "UPDATED", "INSERT": "INSERTED"}.get(operation, "CHANGED") if table == target else ("ON_DELETE_CASCADE" if delta < 0 else "INSERTED")})
+                "action": {"DELETE": "DELETED", "UPDATE": "UPDATED", "INSERT": "INSERTED", "DROP_TABLE": "TABLE_DROPPED" if report["committed"] else "TABLE_DROPPED (hypothetical)", "DROP_COLUMN": "COLUMN_DROPPED" if report["committed"] else "COLUMN_DROPPED (hypothetical)"}.get(operation, "CHANGED") if table == target else ("ON_DELETE_CASCADE" if delta < 0 else "INSERTED")})
     for group, fields in (("attendance", (("attendance_percentage", "attendance_percentage"), ("exam_eligible", "exam_eligibility"))),
-                          ("performance", (("weighted_average_score", "weighted_average_score"),))):
+                          ("performance", (("weighted_average_score", "weighted_average_score"), ("weighted_gpa", "weighted_gpa")))):
         old = {(r["student_id"], r.get("course_code")): r for r in raw.get("academic_before", {}).get(group, [])}
         new = {(r["student_id"], r.get("course_code")): r for r in raw.get("academic_after", {}).get(group, [])}
         for key in sorted(old.keys() | new.keys()):
@@ -78,11 +82,13 @@ def normalize_report(sql, raw, elapsed_ms):
                 if key[1]:
                     item["course_code"] = key[1]
                 report["metrics"].append(item)
-    report["logs"] = ["REPEATABLE READ snapshot; baseline and after counts captured.",
-                      "Academic metrics reflect the delivered schema; weighted score is not CGPA."]
-    if report["rolled_back"]:
-        report["logs"].append("ROLLBACK acknowledged; transaction changes discarded.")
-    else:
+    report["logs"] = raw.get("logs", [])
+    for key in ("ddl_mode", "query_columns", "query_rows", "query_truncated", "message"):
+        if key in raw:
+            report[key] = raw[key]
+    if report["rolled_back"] and report["statement_type"] == "VERIFICATION_SELECT":
+        report["status"] = "VERIFIED_PRISTINE"
+    if not report["rolled_back"] and not report["committed"]:
         report["error_message"] = "Rollback was not confirmed."
     return report
 
@@ -102,12 +108,12 @@ def run_whatif(sql):
         return error_report("", "Enter a SQL statement.", "REJECTED")
     started = perf_counter()
     if live_run_whatif is None:
-        return offline_report(sql)
+        return error_report(sql, "Live engine dependencies unavailable.") if os.getenv("WHATIF_REQUIRE_LIVE") == "1" else offline_report(sql)
     try:
         raw = live_run_whatif(sql)
         return normalize_report(sql, raw, (perf_counter() - started) * 1000)
     except ConnectionError:
-        return offline_report(sql)
+        return error_report(sql, "PostgreSQL unavailable; live mode forbids mock fallback.") if os.getenv("WHATIF_REQUIRE_LIVE") == "1" else offline_report(sql)
     except ValueError as exc:
         report = error_report(sql, str(exc), "REJECTED")
     except Exception:
@@ -139,13 +145,19 @@ def create_bottle_app():
     @app.route("/api/whatif", method=["POST", "OPTIONS"])
     def api_whatif():
         response.content_type = "application/json"
-        response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type"
 
+        origin = request.headers.get("Origin")
+        if origin and origin != f"{request.urlparts.scheme}://{request.headers.get('Host')}":
+            response.status = 403
+            return error_report("", "Cross-origin SQL execution is not allowed.", "REJECTED")
         if request.method == "OPTIONS":
             return {}
 
+        if request.content_type.split(";", 1)[0].lower() != "application/json":
+            response.status = 415
+            return error_report("", "SQL requests require application/json.", "REJECTED")
         data = request.json
         sql = data.get("sql") if isinstance(data, dict) else None
 
@@ -159,46 +171,9 @@ def create_bottle_app():
     @app.route("/api/scenarios", method="GET")
     def api_scenarios():
         response.content_type = "application/json"
-        return {
-            "scenarios": [
-                {
-                    "id": "1",
-                    "title": "Attendance Deletion (Eligibility Flip)",
-                    "sql": "WHAT_IF DELETE FROM attendance WHERE student_id = 1042;",
-                    "description": "Attendance drops below 75%; exam eligibility flips to INELIGIBLE."
-                },
-                {
-                    "id": "2",
-                    "title": "Mark Update (CGPA Recalculation)",
-                    "sql": "WHAT_IF UPDATE marks SET score = 45 WHERE student_id = 1042 AND course_id = 'CSE202';",
-                    "description": "Calculates exact CGPA shift."
-                },
-                {
-                    "id": "3",
-                    "title": "Course Deregistration (Cascade)",
-                    "sql": "WHAT_IF DELETE FROM enrollments WHERE student_id = 1042 AND course_id = 'CSE202';",
-                    "description": "ON DELETE CASCADE removes attendance and marks automatically."
-                },
-                {
-                    "id": "4",
-                    "title": "Drop Column (Broken Schema)",
-                    "sql": "WHAT_IF ALTER TABLE marks DROP COLUMN score;",
-                    "description": "pg_depend & pg_rewrite report broken views and failing metrics."
-                },
-                {
-                    "id": "5",
-                    "title": "Safety Filter Rejection",
-                    "sql": "WHAT_IF COMMIT;",
-                    "description": "Rejects COMMIT and transaction escapements."
-                },
-                {
-                    "id": "6",
-                    "title": "Verify Pristine State",
-                    "sql": "SELECT student_id, name, attendance_pct, cgpa, exam_eligible FROM student_summary_view WHERE student_id = 1042;",
-                    "description": "Confirms live database remains unchanged."
-                }
-            ]
-        }
+        with open(os.path.join(BASE_DIR, "scenarios.json")) as source:
+            return {"scenarios": json.load(source)}
+
 
     return app
 
@@ -216,8 +191,33 @@ def run_http_server(host: str, port: int):
                 return os.path.join(WEB_DIR, rel)
             return super().translate_path(path)
 
+        def do_GET(self):
+            if self.path == "/api/scenarios":
+                try:
+                    with open(os.path.join(BASE_DIR, "scenarios.json"), "r", encoding="utf-8") as source:
+                        data = {"scenarios": json.load(source)}
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(data).encode("utf-8"))
+                except Exception as ex:
+                    self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": str(ex)}).encode("utf-8"))
+                return
+            return super().do_GET()
+
         def do_POST(self):
             if self.path == "/api/whatif":
+                origin = self.headers.get("Origin")
+                if origin and origin != f"http://{self.headers.get('Host')}":
+                    self.send_error(403, "Cross-origin SQL execution is not allowed.")
+                    return
+                if self.headers.get("Content-Type", "").split(";", 1)[0].lower() != "application/json":
+                    self.send_error(415, "SQL requests require application/json.")
+                    return
                 content_len = int(self.headers.get("Content-Length", 0))
                 post_body = self.rfile.read(content_len)
                 try:
